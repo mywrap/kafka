@@ -8,8 +8,7 @@ import (
 )
 
 func main() {
-	servers := "10.100.50.100:9092,10.100.50.101:9092,10.100.50.102:9092"
-	//servers := "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092"
+	servers := "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092"
 	producer, err := kafka.NewProducer(kafka.ProducerConfig{
 		BrokersList:  servers,
 		RequiredAcks: kafka.WaitForAll,
@@ -18,26 +17,29 @@ func main() {
 		log.Fatal(err)
 	}
 
-	consumer, err := kafka.NewConsumer(kafka.ConsumerConfig{
-		BootstrapServers: servers,
-		GroupId:          "group0",
-		Offset:           kafka.OffsetLatest,
-		Topics:           "topic0,topic1",
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-	time.Sleep(100 * time.Millisecond) // TODO: NewConsumer should be ready
-
-	go func() {
-		for {
-			msg, err := consumer.ReadMessage(1 * time.Second)
-			if err != nil {
-				continue
-			}
-			_ = msg
+	if false {
+		consumer, err := kafka.NewConsumer(kafka.ConsumerConfig{
+			BootstrapServers: servers,
+			GroupId:          "group0",
+			Offset:           kafka.OffsetLatest,
+			Topics:           "topic0,topic1",
+		})
+		if err != nil {
+			log.Fatal(err)
 		}
-	}()
+		time.Sleep(100 * time.Millisecond) // TODO: NewConsumer should be ready
+
+		go func() {
+			for {
+				msg, err := consumer.ReadMessage(1 * time.Second)
+				if err != nil {
+					continue
+				}
+				_ = msg
+			}
+		}()
+	}
+
 	producer.SendMessage(
 		"topic0",
 		"msg at "+time.Now().Format(time.RFC3339Nano),

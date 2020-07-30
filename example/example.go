@@ -31,19 +31,24 @@ func main() {
 		time.Sleep(100 * time.Millisecond) // TODO: NewConsumer should be ready
 
 		go func() {
+			receivedCount := 0
 			for {
 				msg, err := consumer.ReadMessage(1 * time.Second)
 				if err != nil {
 					continue
 				}
 				_ = msg
+				receivedCount += 1
+				log.Printf("receivedCount: %v", receivedCount)
 			}
 		}()
 	}
 
-	producer.SendMessage(
-		"topic0",
-		"msg at "+time.Now().Format(time.RFC3339Nano),
-	)
+	for i := 0; i < 10; i++ {
+		producer.SendMessage(
+			"topic0",
+			"msg at "+time.Now().Format(time.RFC3339Nano),
+		)
+	}
 	time.Sleep(500 * time.Millisecond)
 }

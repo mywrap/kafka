@@ -87,7 +87,6 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("err create consumer client: %v", err)
 	}
-	log.Infof("connected to kafka cluster %v", conf.BootstrapServers)
 
 	c.handler = &consumerGroupHandlerImpl{
 		consumer:  c,
@@ -123,8 +122,10 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 			c.handler.readyChan = make(chan bool)
 		}
 	}()
+
 	// wait client to join consumer group
 	<-c.handler.readyChan
+	log.Infof("connected to kafka cluster %v", conf.BootstrapServers)
 	return c, nil
 }
 

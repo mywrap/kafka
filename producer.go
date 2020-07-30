@@ -16,8 +16,6 @@ import (
 type ProducerConfig struct {
 	// BrokersList is a comma separated list: "broker1:9092,broker2:9092,broker3:9092"
 	BrokersList string
-	// DefaultTopic should not be empty
-	DefaultTopic string
 	// RequiredAcks is the level of acknowledgement reliability,
 	// recommend value: WaitForLocal
 	RequiredAcks SendMsgReliabilityLevel
@@ -25,9 +23,8 @@ type ProducerConfig struct {
 
 // Producer _
 type Producer struct {
-	defaultTopic string
-	samProducer  sarama.AsyncProducer
-	Metric       metric.Metric
+	samProducer sarama.AsyncProducer
+	Metric      metric.Metric
 }
 
 // NewProducer returns a connected Producer
@@ -48,9 +45,9 @@ func NewProducer(conf ProducerConfig) (*Producer, error) {
 	samConf.Producer.Return.Successes = true
 
 	// connect to kafka
-	metric := metric.NewMemoryMetric()
-	gofast.NewCron(metric.Reset, 24*time.Hour, 17*time.Hour)
-	p := &Producer{defaultTopic: conf.DefaultTopic, Metric: metric}
+	metric0 := metric.NewMemoryMetric()
+	gofast.NewCron(metric0.Reset, 24*time.Hour, 17*time.Hour)
+	p := &Producer{Metric: metric0}
 	brokers := strings.Split(conf.BrokersList, ",")
 	var err error
 	p.samProducer, err = sarama.NewAsyncProducer(brokers, samConf)
@@ -107,8 +104,8 @@ func (p Producer) SendExplicitMessage(topic string, value string, key string) er
 }
 
 // SendMessage sends message to a random partition of defaultTopic
-func (p Producer) SendMessage(value string) error {
-	return p.SendExplicitMessage(p.defaultTopic, value, "")
+func (p Producer) SendMessage(topic string, msg string) error {
+	return p.SendExplicitMessage(topic, msg, "")
 }
 
 // Errors when produce

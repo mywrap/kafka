@@ -57,6 +57,7 @@ type Message struct {
 
 // Consumer _
 type Consumer struct {
+	groupId string
 	client  sarama.ConsumerGroup
 	handler *consumerGroupHandlerImpl
 	// call this func to stop the connecting loop in the constructor
@@ -81,7 +82,7 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 	samConf.Consumer.Offsets.Initial = int64(conf.Offset)
 
 	// connect to kafka
-	c := &Consumer{}
+	c := &Consumer{groupId: conf.GroupId}
 	brokers := strings.Split(conf.BootstrapServers, ",")
 	c.client, err = sarama.NewConsumerGroup(brokers, conf.GroupId, samConf)
 	if err != nil {
@@ -247,9 +248,10 @@ func (h *consumerGroupHandlerImpl) ConsumeClaim(
 					msg.Topic, msg.Partition, msg.Offset, msg.Value)
 				select {
 				case readRequest.responseChan <- msg:
-					session.MarkMessage(samMsg, "")
+					log.Debugf("checkpoint0 case commit")
+					//session.MarkMessage(samMsg, "")
 				case <-readRequest.ctx.Done():
-					//log.Debugf("partition %v cannot respond ", partition)
+					log.Debugf("checkpoint1 case cancel")
 				}
 			} else {
 				log.Infof("unexpected branch nil saramaMsg", partition)

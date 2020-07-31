@@ -8,19 +8,18 @@ import (
 )
 
 func main() {
-	//"192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092"
-
 	producer, err := kafka.NewProducer(kafka.ProducerConfig{
-		BrokersList:  "192.168.99.100:9092,192.168.99.101:9092",
+		BrokersList:  "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092",
 		RequiredAcks: kafka.WaitForAll,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
+	producer.SendMessage("topic1", "PING")
 
 	if true {
 		consumer, err := kafka.NewConsumer(kafka.ConsumerConfig{
-			BootstrapServers: "192.168.99.102:9092",
+			BootstrapServers: "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092",
 			GroupId:          "group0",
 			Offset:           kafka.OffsetLatest,
 			Topics:           "topic0,topic1",
@@ -35,6 +34,9 @@ func main() {
 			for {
 				msg, err := consumer.ReadMessage(1 * time.Second)
 				if err != nil {
+					if err != kafka.ErrReadMsgTimeout {
+						log.Printf("error consumer ReadMessage: %v", err)
+					}
 					continue
 				}
 				_ = msg
@@ -50,5 +52,5 @@ func main() {
 			"msg at "+time.Now().Format(time.RFC3339Nano),
 		)
 	}
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(30 * time.Second)
 }

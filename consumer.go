@@ -149,10 +149,12 @@ func (c Consumer) ReadMessage(ctx context.Context) ([]Message, error) {
 	if c.stopCtx.Err() != nil {
 		return nil, ErrConsumerStopped
 	}
-	c.Mutex.Lock()
+	time.Sleep(100 * time.Millisecond)
+	c.Lock()
 	currentHandler := c.handler
-	c.Mutex.Unlock()
+	c.Unlock()
 	if currentHandler == nil {
+		log.Debugf("currentHandler: %#v", currentHandler)
 		return nil, ErrNilHandler
 	}
 
@@ -245,6 +247,7 @@ func (h *handlerImpl) ConsumeClaim(
 		select {
 		case partReq := <-readMsgChan:
 			// have to reply to responseChan even if partReq's context cancelled
+			log.Debugf("partReq: %#v", partReq)
 			select {
 			case samMsg, opening := <-claim.Messages():
 				if !opening {

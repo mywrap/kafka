@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/mywrap/gofast"
+	"github.com/mywrap/log"
 	"github.com/mywrap/metric"
 )
 
@@ -21,6 +22,8 @@ func Test_Kafka(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	producer.IsLog = false
+
 	topic0 := fmt.Sprintf("topic_%v", gofast.UUIDGenNoHyphen()[:8])
 
 	// test number of successfully sent and received messages
@@ -39,14 +42,17 @@ func Test_Kafka(t *testing.T) {
 	nReceived := 0
 	go func() {
 		for {
+			log.Debugf("about to consumer ReadMessage")
 			msgs, err := consumer.ReadMessage(context.Background())
 			if err != nil {
-				t.Errorf("consumer ReadMessage: %v", err)
+				t.Errorf("error when consumer ReadMessage: %v", err)
+				continue
 			}
 			nReceived += len(msgs)
 			for _, msg := range msgs {
-				rMetric.Count(fmt.Sprintf("%v", msg.Partition))
+				rMetric.Count(fmt.Sprintf("%v:%v", msg.Topic, msg.Partition))
 			}
+			t.Logf("nReceived: %v", nReceived)
 		}
 	}()
 

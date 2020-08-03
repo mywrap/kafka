@@ -48,7 +48,7 @@ func NewProducer(conf ProducerConfig) (*Producer, error) {
 	// connect to kafka
 	metric0 := metric.NewMemoryMetric()
 	gofast.NewCron(metric0.Reset, 24*time.Hour, 17*time.Hour)
-	p := &Producer{Metric: metric0}
+	p := &Producer{Metric: metric0, IsLog: true}
 	brokers := strings.Split(conf.BrokersList, ",")
 	var err error
 	p.samProducer, err = sarama.NewAsyncProducer(brokers, samConf)

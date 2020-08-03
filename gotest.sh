@@ -1,6 +1,7 @@
 # run this script in project root directory
 
 # Vet examines Go source code and reports suspicious constructs
+printf '\ec'
 go vet ./...
 
 # Run all unittests, include some network tests.

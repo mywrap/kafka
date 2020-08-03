@@ -44,8 +44,8 @@ type Consumer struct {
 	stopCtx context.Context // correspond to stopCxl
 	// consumer's handler will only be changed func runSession,
 	// it will be nil while a new session is initializing
-	handler     *handlerImpl
-	*sync.Mutex // protect handler
+	handler *handlerImpl
+	mutex   *sync.Mutex // protect handler
 
 	groupId string // just for debugging
 	IsLog   bool   // whether to log when receiving a message
@@ -55,7 +55,7 @@ type Consumer struct {
 // connecting fail)
 func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 	log.Printf("creating a consumer with %#v", conf)
-	csm := &Consumer{Mutex: &sync.Mutex{}, groupId: conf.GroupId, IsLog: true}
+	csm := &Consumer{mutex: &sync.Mutex{}, groupId: conf.GroupId, IsLog: true}
 	csm.stopCtx, csm.stopCxl = context.WithCancel(context.Background())
 	samConf := sarama.NewConfig()
 	samConf.Consumer.Offsets.Initial = int64(conf.Offset)
@@ -66,12 +66,12 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 
 	runSession := func() *handlerImpl {
 		// close current handler
-		csm.Lock()
+		csm.mutex.Lock()
 		if csm.handler != nil && csm.handler.client != nil {
 			csm.handler.client.Close()
 		}
 		csm.handler = nil
-		csm.Unlock()
+		csm.mutex.Unlock()
 
 		// create new client, new handler, new session
 		handler := &handlerImpl{
@@ -81,7 +81,7 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 			readMsgChans: make(map[string](chan *partRequest)),
 			consumer:     csm,
 			client:       nil,
-			RWMutex:      &sync.RWMutex{},
+			mu:           &sync.RWMutex{},
 		}
 		client, err := sarama.NewConsumerGroup(brokers, conf.GroupId, samConf)
 		if err != nil {
@@ -114,28 +114,26 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 		case <-handler.ssnEndedChan:
 			return nil, handler.ssnEndedErr
 		case <-handler.readyChan:
-			csm.Lock()
+			csm.mutex.Lock()
 			csm.handler = handler
-			csm.Unlock()
+			csm.mutex.Unlock()
 		}
 	}
 	// from now, consumer will auto reconnect if needed
 	go func() {
-		for csm.stopCtx.Err() == nil {
-			csm.Lock()
+		for csm.stopCtx.Err() == nil { // while consumer have not stopped
 			if csm.handler != nil {
 				<-csm.handler.ssnEndedChan
 			}
-			csm.Unlock()
 			time.Sleep(1 * time.Second) // retry back-off
 			newHandler := runSession()
 			select {
 			case <-newHandler.ssnEndedChan:
 				continue
 			case <-newHandler.readyChan:
-				csm.Lock()
+				csm.mutex.Lock()
 				csm.handler = newHandler
-				csm.Unlock()
+				csm.mutex.Unlock()
 			}
 		}
 	}()
@@ -143,28 +141,25 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 	return csm, nil
 }
 
-// ReadMessage block until it receives at least one message or
-// an error occurred. Messages can be returned even with non-nil error
+// ReadMessage block until it receives at least one message or an error occurred
 func (c Consumer) ReadMessage(ctx context.Context) ([]Message, error) {
 	if c.stopCtx.Err() != nil {
 		return nil, ErrConsumerStopped
 	}
-	time.Sleep(100 * time.Millisecond)
-	c.Lock()
+	c.mutex.Lock()
 	currentHandler := c.handler
-	c.Unlock()
+	c.mutex.Unlock()
 	if currentHandler == nil {
-		log.Debugf("currentHandler: %#v", currentHandler)
 		return nil, ErrNilHandler
 	}
 
 	// send the request to all partitions reader
 	partitionChans := make([](chan *partRequest), 0)
-	currentHandler.RLock()
+	currentHandler.mu.RLock()
 	for _, v := range currentHandler.readMsgChans {
 		partitionChans = append(partitionChans, v)
 	}
-	currentHandler.RUnlock()
+	currentHandler.mu.RUnlock()
 	if len(partitionChans) == 0 { // should be unreachable
 		return nil, errors.New("no ConsumeClaim is running")
 	}
@@ -172,18 +167,22 @@ func (c Consumer) ReadMessage(ctx context.Context) ([]Message, error) {
 	ret := make([]Message, 0)
 	mu := &sync.Mutex{} // to protect ret
 	wg := &sync.WaitGroup{}
+	// create a shared context that will be passed to all partitions, calling
+	// firstMsgCxl means a partition received a message so others stop waiting
+	firstMsgCtx, firstMsgCxl := context.WithCancel(ctx)
 	for _, partitionChan := range partitionChans {
-		r := &partRequest{ctx: ctx, responseChan: make(chan *Message)}
-		partitionChan := partitionChan // local var for goroutine
+		r := &partRequest{ctx: firstMsgCtx, responseChan: make(chan *Message)}
+		partitionChan := partitionChan // local var for goroutines
 		wg.Add(1)
 		go func() {
 			defer wg.Add(-1)
 			select {
 			case <-ctx.Done(): // caller of ReadMessage cancels
-			case <-currentHandler.ssnEndedChan: // handler will not receive
+			case <-currentHandler.ssnEndedChan: // receiver ConsumeClaim stopped
 			case partitionChan <- r: // sent partRequest successfully
 				msg := <-r.responseChan // partition's ConsumeClaim have to reply
 				if msg != nil {
+					firstMsgCxl()
 					mu.Lock()
 					ret = append(ret, *msg)
 					mu.Unlock()
@@ -192,6 +191,10 @@ func (c Consumer) ReadMessage(ctx context.Context) ([]Message, error) {
 		}()
 	}
 	wg.Wait()
+	firstMsgCxl()
+	if len(ret) == 0 { // should be unreachable
+		return nil, ErrReturnEmptyMsgs
+	}
 	return ret, nil
 }
 
@@ -209,12 +212,12 @@ type handlerImpl struct {
 
 	consumer *Consumer            // just for get log config
 	client   sarama.ConsumerGroup // just for calling client_Close
-	*sync.RWMutex
+	mu       *sync.RWMutex
 }
 
 func (h *handlerImpl) Setup(s sarama.ConsumerGroupSession) error {
 	log.Printf("joined consumer group, assigned partitions %#v", s.Claims())
-	h.Lock()
+	h.mu.Lock()
 	h.readMsgChans = make(map[string](chan *partRequest))
 	for topic, parts := range s.Claims() {
 		for _, part := range parts {
@@ -222,14 +225,12 @@ func (h *handlerImpl) Setup(s sarama.ConsumerGroupSession) error {
 				make(chan *partRequest)
 		}
 	}
-	h.Unlock()
+	h.mu.Unlock()
 	close(h.readyChan)
 	return nil
 }
 
-func (h *handlerImpl) Cleanup(sarama.ConsumerGroupSession) error {
-	return nil
-}
+func (h *handlerImpl) Cleanup(sarama.ConsumerGroupSession) error { return nil }
 
 // each assigned partition will run this func in a goroutine
 func (h *handlerImpl) ConsumeClaim(
@@ -237,9 +238,9 @@ func (h *handlerImpl) ConsumeClaim(
 	partition := fmt.Sprintf("%v:%v", claim.Topic(), claim.Partition())
 	log.Printf("started ConsumeClaim partition %v", partition)
 	defer log.Printf("returned partition ConsumeClaim %v", partition)
-	h.RLock()
+	h.mu.RLock()
 	readMsgChan, ok := h.readMsgChans[partition]
-	h.RUnlock()
+	h.mu.RUnlock()
 	if !ok { // should be unreachable, key has to be inited in func Setup
 		return nil
 	}
@@ -247,10 +248,9 @@ func (h *handlerImpl) ConsumeClaim(
 		select {
 		case partReq := <-readMsgChan:
 			// have to reply to responseChan even if partReq's context cancelled
-			log.Debugf("partReq: %#v", partReq)
 			select {
 			case samMsg, opening := <-claim.Messages():
-				if !opening {
+				if !opening { // cluster needs to be rebalanced
 					partReq.responseChan <- nil
 					return nil
 				}
@@ -258,6 +258,7 @@ func (h *handlerImpl) ConsumeClaim(
 					partReq.responseChan <- nil
 					continue
 				}
+				session.MarkMessage(samMsg, "") // commit offset
 				msg := &Message{Value: string(samMsg.Value), Offset: samMsg.Offset,
 					Topic: samMsg.Topic, Partition: samMsg.Partition,
 					Key: string(samMsg.Key), Timestamp: samMsg.Timestamp}
@@ -265,7 +266,7 @@ func (h *handlerImpl) ConsumeClaim(
 					"received a message from topic %v:%v:%v: %v",
 					msg.Topic, msg.Partition, msg.Offset, msg.Value)
 				partReq.responseChan <- msg // take care of blocking
-			case <-partReq.ctx.Done():
+			case <-partReq.ctx.Done(): //
 				partReq.responseChan <- nil
 			}
 		case <-h.ssnEndedChan: // included consumer stopped
@@ -292,4 +293,5 @@ const (
 var (
 	ErrConsumerStopped = errors.New("consumer stopped")
 	ErrNilHandler      = errors.New("session is starting, try again")
+	ErrReturnEmptyMsgs = errors.New("something went wrong, empty return")
 )

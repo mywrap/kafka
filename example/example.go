@@ -1,15 +1,18 @@
 package main
 
 import (
+	"context"
+	"log"
 	"time"
 
 	"github.com/mywrap/kafka"
-	"github.com/mywrap/log"
 )
 
 func main() {
+	brokers := "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092"
+
 	producer, err := kafka.NewProducer(kafka.ProducerConfig{
-		BrokersList:  "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092",
+		BrokersList:  brokers,
 		RequiredAcks: kafka.WaitForAll,
 	})
 	if err != nil {
@@ -17,34 +20,28 @@ func main() {
 	}
 	producer.SendMessage("topic1", "PING")
 
-	if true {
-		consumer, err := kafka.NewConsumer(kafka.ConsumerConfig{
-			BootstrapServers: "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092",
-			GroupId:          "group0",
-			Offset:           kafka.OffsetLatest,
-			Topics:           "topic0,topic1",
-		})
-		if err != nil {
-			log.Fatal(err)
-		}
-		time.Sleep(100 * time.Millisecond) // TODO: NewConsumer should be ready
-
-		go func() {
-			receivedCount := 0
-			for {
-				msg, err := consumer.ReadMessage(1 * time.Second)
-				if err != nil {
-					if err != kafka.ErrReadMsgTimeout {
-						log.Printf("error consumer ReadMessage: %v", err)
-					}
-					continue
-				}
-				_ = msg
-				receivedCount += 1
-				log.Printf("receivedCount: %v", receivedCount)
-			}
-		}()
+	consumer, err := kafka.NewConsumer(kafka.ConsumerConfig{
+		BootstrapServers: brokers,
+		GroupId:          "group0",
+		Offset:           kafka.OffsetEarliest,
+		Topics:           "topic0,topic1",
+	})
+	if err != nil {
+		log.Fatal(err)
 	}
+
+	go func() {
+		nRecvs := 0
+		for {
+			msgs, err := consumer.ReadMessage(context.Background())
+			if err != nil {
+				log.Printf("error when consumer ReadMessage: %v\n", err)
+			}
+			_ = msgs[0]
+			nRecvs += 1
+			log.Printf("number of received messages: %v", nRecvs)
+		}
+	}()
 
 	for i := 0; i < 10; i++ {
 		producer.SendMessage(

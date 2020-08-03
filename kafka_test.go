@@ -94,12 +94,20 @@ func Test_Kafka(t *testing.T) {
 
 	t.Logf("sent: %v, received: %v, durInit: %v, durRead: %v",
 		nSent, nReceived, csmT1.Sub(csmT0), csmT2.Sub(csmT1))
+}
 
-	// test re-consume with same groupId
-	//group1 := fmt.Sprintf("group_%v", gofast.UUIDGenNoHyphen()[:8])
-	//consumer1, err := NewConsumer(ConsumerConfig{
-	//	BootstrapServers: "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092",
-	//	Topics:           topic0, GroupId: group1, Offset: OffsetEarliest,
-	//})
-	//consumer1.ReadMessage()
+func TestConsumer_Stop(t *testing.T) {
+	// TODO: TestConsumer_Stop
+}
+
+func TestConsumer_Reconnect(t *testing.T) {
+	// TODO: TestConsumer_Reconnect
+}
+
+func TestConsumer_CancelReadMessage(t *testing.T) {
+	// TODO: TestConsumer_CancelReadMessage
+}
+
+func TestProducer_SendMessageFail(t *testing.T) {
+	// TODO: TestProducer_SendMessageFail
 }

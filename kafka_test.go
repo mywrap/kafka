@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -20,12 +21,15 @@ func Test_Kafka(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	newTestTopic := fmt.Sprintf("topic_%v", gofast.UUIDGenNoHyphen())
+	topic0 := fmt.Sprintf("topic_%v", gofast.UUIDGenNoHyphen()[:8])
+
+	// test number of successfully sent and received messages
+	group0 := fmt.Sprintf("group_%v", gofast.UUIDGenNoHyphen()[:8])
 	consumer, err := NewConsumer(ConsumerConfig{
 		BootstrapServers: "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092",
-		GroupId:          fmt.Sprintf("group_%v", gofast.UUIDGenNoHyphen()),
+		Topics:           topic0,
+		GroupId:          group0,
 		Offset:           OffsetEarliest,
-		Topics:           newTestTopic,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -35,28 +39,27 @@ func Test_Kafka(t *testing.T) {
 	nReceived := 0
 	go func() {
 		for {
-			msg, err := consumer.ReadMessage(1 * time.Second)
+			msgs, err := consumer.ReadMessage(context.Background())
 			if err != nil {
-				if err != ErrReadMsgTimeout {
-					t.Errorf("error consumer ReadMessage: %v", err)
-				}
-				continue
+				t.Errorf("consumer ReadMessage: %v", err)
 			}
-			nReceived += 1
-			rMetric.Count(fmt.Sprintf("%v", msg.Partition))
+			nReceived += len(msgs)
+			for _, msg := range msgs {
+				rMetric.Count(fmt.Sprintf("%v", msg.Partition))
+			}
 		}
 	}()
 
 	nMsgs := 1000
 	for i := 0; i < nMsgs; i++ {
-		producer.SendMessage(newTestTopic,
+		producer.SendMessage(topic0,
 			"msg at "+time.Now().Format(time.RFC3339Nano))
 	}
 	time.Sleep(1 * time.Second) // wait for consumer
 
 	t.Logf("consumer group: %v", consumer.groupId)
 	for _, v := range rMetric.GetCurrentMetric() {
-		t.Logf("key: %v, count: %v", v.Key, v.RequestCount)
+		t.Logf("consumer met key: %v, count: %v", v.Key, v.RequestCount)
 	}
 	if nReceived != nMsgs {
 		t.Errorf("received expected: %v, real: %v", nMsgs, nReceived)
@@ -65,7 +68,7 @@ func Test_Kafka(t *testing.T) {
 	//t.Logf("%#v", producer.Metric.GetCurrentMetric())
 	nSent := 0
 	for _, v := range producer.Metric.GetCurrentMetric() {
-		t.Logf("key: %v, count: %v", v.Key, v.RequestCount)
+		t.Logf("producer met key: %v, count: %v", v.Key, v.RequestCount)
 		if strings.Contains(v.Key, "success") {
 			nSent += v.RequestCount
 		}
@@ -76,4 +79,12 @@ func Test_Kafka(t *testing.T) {
 
 	t.Logf("time %v: sent: %v, received: %v",
 		time.Now().Format(time.RFC3339), nSent, nReceived)
+
+	// test re-consume with same groupId
+	//group1 := fmt.Sprintf("group_%v", gofast.UUIDGenNoHyphen()[:8])
+	//consumer1, err := NewConsumer(ConsumerConfig{
+	//	BootstrapServers: "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092",
+	//	Topics:           topic0, GroupId: group1, Offset: OffsetEarliest,
+	//})
+	//consumer1.ReadMessage()
 }

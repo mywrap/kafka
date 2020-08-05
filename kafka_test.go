@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/mywrap/gofast"
-	"github.com/mywrap/log"
 	"github.com/mywrap/metric"
 )
 
@@ -49,10 +48,10 @@ func Test_Kafka(t *testing.T) {
 	var csmT2 time.Time
 	go func() {
 		for {
-			log.Debugf("about to consumer ReadMessage")
-			msgs, err := consumer.ReadMessage(context.Background())
+			//t.Logf("about to consumer Consume")
+			msgs, err := consumer.Consume(context.Background())
 			if err != nil {
-				t.Errorf("error when consumer ReadMessage: %v", err)
+				t.Errorf("error when consumer Consume: %v", err)
 				continue
 			}
 			nReceived += len(msgs)
@@ -62,12 +61,12 @@ func Test_Kafka(t *testing.T) {
 			if nReceived == nMsgs {
 				csmT2 = time.Now()
 			}
-			t.Logf("nReceived: %v", nReceived)
+			//t.Logf("nReceived: %v", nReceived)
 		}
 	}()
 
 	for i := 0; i < nMsgs; i++ {
-		producer.SendMessage(topic0,
+		producer.Produce(topic0,
 			"msg at "+time.Now().Format(time.RFC3339Nano))
 	}
 	time.Sleep(1 * time.Second) // wait for consumer
@@ -104,10 +103,10 @@ func TestConsumer_Reconnect(t *testing.T) {
 	// TODO: TestConsumer_Reconnect
 }
 
-func TestConsumer_CancelReadMessage(t *testing.T) {
-	// TODO: TestConsumer_CancelReadMessage
+func TestConsumer_CancelConsume(t *testing.T) {
+	// TODO: TestConsumer_CancelConsume
 }
 
-func TestProducer_SendMessageFail(t *testing.T) {
-	// TODO: TestProducer_SendMessageFail
+func TestProducer_ProduceFail(t *testing.T) {
+	// TODO: TestProducer_ProduceFail
 }

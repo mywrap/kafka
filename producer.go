@@ -82,7 +82,13 @@ func NewProducer(conf ProducerConfig) (*Producer, error) {
 	return p, nil
 }
 
-// SendExplicitMessage sends messages have a same key to same partition
+// ProduceWithKey sends messages have a same key to same partition.
+func (p Producer) ProduceWithKey(topic string, message string, key string) error {
+	return p.SendExplicitMessage(topic, message, key)
+}
+
+// SendExplicitMessage _
+// Deprecated: use ProduceWithKey instead
 func (p Producer) SendExplicitMessage(topic string, value string, key string) error {
 	msgMeta := MsgMetadata{UniqueId: gofast.GenUUID(), SentAt: time.Now()}
 	samMsg := &sarama.ProducerMessage{
@@ -96,7 +102,7 @@ func (p Producer) SendExplicitMessage(topic string, value string, key string) er
 	var err error
 	select {
 	case p.samProducer.Input() <- samMsg:
-		log.Condf(p.IsLog, "sending msgId %v to %v:%v: %v",
+		log.Condf(p.IsLog, "producing msgId %v to %v:%v: %v",
 			msgMeta.UniqueId, samMsg.Topic, key, samMsg.Value)
 		err = nil
 	case <-time.After(30 * time.Second):
@@ -105,7 +111,12 @@ func (p Producer) SendExplicitMessage(topic string, value string, key string) er
 	return err
 }
 
-// SendMessage sends message to a random partition of defaultTopic
+// Produce sends input message to Kafka clusters
+func (p Producer) Produce(topic string, msg string) error {
+	return p.SendExplicitMessage(topic, msg, "")
+}
+
+// Deprecated: use Produce instead
 func (p Producer) SendMessage(topic string, msg string) error {
 	return p.SendExplicitMessage(topic, msg, "")
 }

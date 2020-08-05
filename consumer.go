@@ -141,7 +141,12 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 	return csm, nil
 }
 
-// ReadMessage block until it receives at least one message or an error occurred
+func (c Consumer) Consume(ctx context.Context) ([]Message, error) {
+	return c.ReadMessage(ctx)
+}
+
+// ReadMessage block until it receives at least one message or an error occurred.
+// Deprecated: use Consume instead
 func (c Consumer) ReadMessage(ctx context.Context) ([]Message, error) {
 	if c.stopCtx.Err() != nil {
 		return nil, ErrConsumerStopped

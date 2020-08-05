@@ -17,7 +17,7 @@ producer, err := kafka.NewProducer(kafka.ProducerConfig{
 if err != nil {
     log.Fatal(err)
 }
-producer.SendMessage("topic1", "PING")
+producer.Produce("topic1", "PING")
 // log: delivered msgId d151f0ab} to topic topic1:0:2
 ````
 
@@ -36,10 +36,10 @@ if err != nil {
 }
 
 ctx, cxl := context.WithCancel(context.Background())
-msg, err := consumer.ReadMessage() // auto commit offset, but not guarantee
+msg, err := consumer.Consume() // auto commit offset, but not guarantee
 if err != nil {
-    log.Printf("error when consumer ReadMessage: %v\n", err)
+    log.Printf("error when consumer Consume: %v\n", err)
 }
 process(msg)
-// call cxl() to stop ReadMessage
+// call cxl() to stop Consume at anytime
 ````

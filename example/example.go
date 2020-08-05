@@ -18,7 +18,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	producer.SendMessage("topic1", "PING")
+	producer.Produce("topic1", "PING")
 
 	consumer, err := kafka.NewConsumer(kafka.ConsumerConfig{
 		BootstrapServers: brokers,
@@ -33,7 +33,7 @@ func main() {
 	go func() {
 		nRecvs := 0
 		for {
-			msgs, err := consumer.ReadMessage(context.Background())
+			msgs, err := consumer.Consume(context.Background())
 			if err != nil {
 				log.Printf("error when consumer ReadMessage: %v\n", err)
 			}
@@ -44,7 +44,7 @@ func main() {
 	}()
 
 	for i := 0; i < 10; i++ {
-		producer.SendMessage(
+		producer.Produce(
 			"topic0",
 			"msg at "+time.Now().Format(time.RFC3339Nano),
 		)

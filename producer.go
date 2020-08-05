@@ -60,13 +60,13 @@ func NewProducer(conf ProducerConfig) (*Producer, error) {
 		for err := range p.samProducer.Errors() {
 			errMsg := err.Err.Error()
 			if errMsg == "circuit breaker is open" {
-				errMsg = "probably you did not assign topic"
+				errMsg = "probably you did not input a topic"
 			}
 			metricKey := fmt.Sprintf("%v:%v_error",
 				err.Msg.Topic, err.Msg.Partition)
 			p.Metric.Count(metricKey)
 			p.Metric.Duration(metricKey, since(err.Msg.Metadata))
-			log.Infof("failed to write msgId %v to topic %v: %v",
+			log.Infof("failed to produce msgId %v to topic %v: %v",
 				err.Msg.Metadata, err.Msg.Topic, errMsg)
 		}
 	}()
@@ -111,9 +111,10 @@ func (p Producer) SendExplicitMessage(topic string, value string, key string) er
 	return err
 }
 
-// Produce sends input message to Kafka clusters
+// Produce sends input message to Kafka clusters.
+// This func only return timeout error, other errors will be log by the Producer
 func (p Producer) Produce(topic string, msg string) error {
-	return p.SendExplicitMessage(topic, msg, "")
+	return p.SendMessage(topic, msg)
 }
 
 // Deprecated: use Produce instead
@@ -146,7 +147,7 @@ type MsgMetadata struct {
 
 func since(msgMetaI interface{}) time.Duration {
 	msgMeta, ok := msgMetaI.(MsgMetadata)
-	if !ok {
+	if !ok { // unreachable
 		return 0
 	}
 	return time.Since(msgMeta.SentAt)

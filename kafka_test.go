@@ -26,6 +26,13 @@ func Test_Kafka(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	producer.Produce("", "msg to empty topic")
+	time.Sleep(10 * time.Millisecond)
+	metricRows := producer.Metric.GetCurrentMetric()
+	if strings.Contains(metricRows[0].Key, "fail") {
+		t.Errorf("expected fail because of invalid topic")
+	}
+
 	csmT0 := time.Now()
 	group0 := fmt.Sprintf("group_%v", gofast.UUIDGenNoHyphen()[:8])
 	consumer, err := NewConsumer(ConsumerConfig{
@@ -41,7 +48,6 @@ func Test_Kafka(t *testing.T) {
 
 	producer.IsLog = false
 	consumer.IsLog = false
-
 	nMsgs := 1000
 	rMetric := metric.NewMemoryMetric()
 	nReceived := 0
@@ -66,8 +72,12 @@ func Test_Kafka(t *testing.T) {
 	}()
 
 	for i := 0; i < nMsgs; i++ {
-		producer.Produce(topic0,
-			"msg at "+time.Now().Format(time.RFC3339Nano))
+		msg := "msg at " + time.Now().Format(time.RFC3339Nano)
+		if i > 8*nMsgs/10 {
+			producer.ProduceWithKey(topic0, msg, "key810")
+			continue
+		}
+		producer.Produce(topic0, msg)
 	}
 	time.Sleep(1 * time.Second) // wait for consumer
 

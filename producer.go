@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"compress/gzip"
 	"errors"
 	"fmt"
 	"strings"
@@ -16,16 +17,27 @@ import (
 type ProducerConfig struct {
 	// BrokersList is comma separated: "broker1:9092,broker2:9092,broker3:9092"
 	BrokersList string
-	// RequiredAcks is the level of acknowledgement reliability,
-	// recommend value: WaitForLocal
+	// level of acknowledgement reliability, default NoResponse
 	RequiredAcks SendMsgReliabilityLevel
+
+	//
+	// following configs are optional
+	//
+
+	IsCompressed bool // if true, producer will use gzip level BestCompression
+	// size before compress, default 1000000,
+	// should <= broker's message.max.bytes after compressed
+	MaxMsgBytes   int
+	DisableLog    bool // default enable log on produced and delivered a message
+	LogMaxLineLen int  // default no limit (can log a very large message)
 }
 
 // Producer _
 type Producer struct {
-	samProducer sarama.AsyncProducer
-	Metric      metric.Metric
-	IsLog       bool
+	samProducer   sarama.AsyncProducer
+	conf          ProducerConfig
+	MetricSuccess metric.Metric
+	MetricError   metric.Metric
 }
 
 // NewProducer returns a connected Producer
@@ -44,11 +56,21 @@ func NewProducer(conf ProducerConfig) (*Producer, error) {
 		return ret
 	}
 	samConf.Producer.Return.Successes = true
+	if conf.IsCompressed {
+		samConf.Producer.Compression = sarama.CompressionGZIP
+		samConf.Producer.CompressionLevel = gzip.BestCompression
+	}
+	if conf.MaxMsgBytes > 0 {
+		samConf.Producer.MaxMessageBytes = conf.MaxMsgBytes
+	}
 
 	// connect to kafka
-	metric0 := metric.NewMemoryMetric()
-	gofast.NewCron(metric0.Reset, 24*time.Hour, 17*time.Hour)
-	p := &Producer{Metric: metric0, IsLog: true}
+	metricS := metric.NewMemoryMetric()
+	gofast.NewCron(metricS.Reset, 24*time.Hour, 17*time.Hour)
+	metricF := metric.NewMemoryMetric()
+	gofast.NewCron(metricF.Reset, 24*time.Hour, 17*time.Hour)
+
+	p := &Producer{conf: conf, MetricSuccess: metricS, MetricError: metricF}
 	brokers := strings.Split(conf.BrokersList, ",")
 	var err error
 	p.samProducer, err = sarama.NewAsyncProducer(brokers, samConf)
@@ -64,8 +86,8 @@ func NewProducer(conf ProducerConfig) (*Producer, error) {
 			}
 			metricKey := fmt.Sprintf("%v:%v_error",
 				err.Msg.Topic, err.Msg.Partition)
-			p.Metric.Count(metricKey)
-			p.Metric.Duration(metricKey, since(err.Msg.Metadata))
+			p.MetricError.Count(metricKey)
+			p.MetricError.Duration(metricKey, since(err.Msg.Metadata))
 			log.Infof("failed to produce msgId %v to topic %v: %v",
 				err.Msg.Metadata, err.Msg.Topic, errMsg)
 		}
@@ -73,13 +95,21 @@ func NewProducer(conf ProducerConfig) (*Producer, error) {
 	go func() {
 		for sent := range p.samProducer.Successes() {
 			metricKey := fmt.Sprintf("%v:%v_success", sent.Topic, sent.Partition)
-			p.Metric.Count(metricKey)
-			p.Metric.Duration(metricKey, since(sent.Metadata))
-			log.Condf(p.IsLog, "delivered msgId %v to topic %v:%v:%v",
+			p.MetricSuccess.Count(metricKey)
+			p.MetricSuccess.Duration(metricKey, since(sent.Metadata))
+			log.Condf(!p.conf.DisableLog,
+				"delivered msgId %v to topic %v:%v:%v",
 				sent.Metadata, sent.Topic, sent.Partition, sent.Offset)
 		}
 	}()
 	return p, nil
+}
+
+func truncateStr(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	return s[:limit]
 }
 
 // ProduceWithKey sends messages have a same key to same partition.
@@ -102,10 +132,18 @@ func (p Producer) SendExplicitMessage(topic string, value string, key string) er
 	var err error
 	select {
 	case p.samProducer.Input() <- samMsg:
-		log.Condf(p.IsLog, "producing msgId %v to %v:%v: %v",
-			msgMeta.UniqueId, samMsg.Topic, key, samMsg.Value)
+		if p.conf.LogMaxLineLen > 0 {
+			log.Condf(!p.conf.DisableLog,
+				"producing msgId %v to %v:%v: len %v, msg: %v",
+				msgMeta.UniqueId, samMsg.Topic, key,
+				len(value), truncateStr(value, p.conf.LogMaxLineLen))
+		} else {
+			log.Condf(!p.conf.DisableLog,
+				"producing msgId %v to %v:%v: msg: %v",
+				msgMeta.UniqueId, samMsg.Topic, key, value)
+		}
 		err = nil
-	case <-time.After(30 * time.Second):
+	case <-time.After(1 * time.Minute):
 		err = ErrWriteTimeout
 	}
 	return err
@@ -120,6 +158,21 @@ func (p Producer) Produce(topic string, msg string) error {
 // Deprecated: use Produce instead
 func (p Producer) SendMessage(topic string, msg string) error {
 	return p.SendExplicitMessage(topic, msg, "")
+}
+
+// return [nSuccesses, nErrors]
+func (p Producer) getNumberOfSuccessError() (int, int) {
+	nSuccesses := 0
+	ss := p.MetricSuccess.GetCurrentMetric()
+	for _, row := range ss {
+		nSuccesses += row.RequestCount
+	}
+	nFails := 0
+	fs := p.MetricError.GetCurrentMetric()
+	for _, row := range fs {
+		nFails += row.RequestCount
+	}
+	return nSuccesses, nFails
 }
 
 // Errors when produce

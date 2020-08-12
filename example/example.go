@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
-	"log"
 	"time"
 
 	"github.com/mywrap/kafka"
+	"github.com/mywrap/log"
 )
 
 func main() {
@@ -43,11 +43,13 @@ func main() {
 		}
 	}()
 
-	for i := 0; i < 10; i++ {
+	nMsg := 360
+	for i := 0; i < nMsg; i++ {
 		producer.Produce(
 			"topic0",
 			"msg at "+time.Now().Format(time.RFC3339Nano),
 		)
+		time.Sleep(1 * time.Second)
 	}
-	time.Sleep(30 * time.Second)
+	time.Sleep(time.Duration(nMsg+100) * time.Second)
 }

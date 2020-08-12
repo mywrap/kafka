@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"compress/gzip"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -153,6 +154,21 @@ func (p Producer) SendExplicitMessage(topic string, value string, key string) er
 // This func only return timeout error, other errors will be log by the Producer
 func (p Producer) Produce(topic string, msg string) error {
 	return p.SendMessage(topic, msg)
+}
+
+func (p Producer) ProduceJSON(topic string, object interface{}) error {
+	switch v := object.(type) {
+	case string:
+		return p.Produce(topic, v)
+	case []byte:
+		return p.Produce(topic, string(v))
+	default:
+		beauty, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		return p.Produce(topic, string(beauty))
+	}
 }
 
 // Deprecated: use Produce instead

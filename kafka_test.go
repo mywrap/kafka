@@ -178,3 +178,34 @@ func genMessage(size int) string {
 	}
 	return bld.String()
 }
+
+func TestProducer_ProduceJSON(t *testing.T) {
+	producer, err := NewProducer(ProducerConfig{
+		BrokersList: brokers, RequiredAcks: WaitForLocal})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type MsgType1 struct {
+		Field0 string
+		Field1 []byte
+	}
+	type MsgType2 struct {
+		Field0 bool
+		Field1 func(a ...interface{}) (n int, err error)
+	}
+	for _, c := range []struct {
+		msg   interface{}
+		isErr bool
+	}{
+		{"msg string", false},
+		{MsgType1{Field0: "I miss", Field1: []byte("no one")}, false},
+		{MsgType2{Field1: fmt.Println}, true},
+	} {
+		err := producer.ProduceJSON("topic2", c.msg)
+		if (err != nil) != c.isErr {
+			t.Errorf("unexpected ProduceJSON: err: %v, msg: %v", err, c.msg)
+		}
+	}
+	time.Sleep(100 * time.Millisecond)
+}

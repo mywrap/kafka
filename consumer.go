@@ -197,8 +197,11 @@ func (c Consumer) ReadMessage(ctx context.Context) ([]Message, error) {
 	}
 	wg.Wait()
 	firstMsgCxl()
-	if len(ret) == 0 { // should be unreachable
-		return nil, ErrReturnEmptyMsgs
+	if len(ret) == 0 {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, ErrReturnEmptyMsgs // should be unreachable
 	}
 	return ret, nil
 }

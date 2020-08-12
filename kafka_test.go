@@ -116,7 +116,19 @@ func TestConsumer_Reconnect(t *testing.T) {
 }
 
 func TestConsumer_CancelConsume(t *testing.T) {
-	// TODO: TestConsumer_CancelConsume
+	consumer, err := NewConsumer(ConsumerConfig{
+		BootstrapServers: brokers,
+		Topics:           fmt.Sprintf("topic_%v", gofast.UUIDGen()),
+		GroupId:          fmt.Sprintf("group_%v", gofast.UUIDGen()),
+		Offset:           OffsetLatest,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cxl := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	_, err = consumer.Consume(ctx)
+	t.Log(err)
+	cxl()
 }
 
 func TestProducer_ProduceFail(t *testing.T) {

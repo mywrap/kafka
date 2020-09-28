@@ -2,15 +2,20 @@ package main
 
 import (
 	"context"
+	"strings"
 	"time"
 
+	"github.com/mywrap/gofast"
 	"github.com/mywrap/kafka"
 	"github.com/mywrap/log"
 )
 
-func main() {
-	brokers := "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092"
+const brokers = "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092"
+const topics = "topicAlice,topicBob,topicCharlie"
 
+//const brokers = "10.100.50.100:9092,10.100.50.101:9092,10.100.50.102:9092"
+
+func main() { // producer
 	producer, err := kafka.NewProducer(kafka.ProducerConfig{
 		BrokersList:  brokers,
 		RequiredAcks: kafka.WaitForAll,
@@ -18,38 +23,33 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	producer.Produce("topic1", "PING")
+	for _, topic := range strings.Split(topics, ",") {
+		producer.Produce(topic, "PING"+time.Now().Format(time.RFC3339Nano))
+	}
+	time.Sleep(2 * time.Second)
+}
 
+func main1() { // consumer
 	consumer, err := kafka.NewConsumer(kafka.ConsumerConfig{
 		BootstrapServers: brokers,
-		GroupId:          "group0",
-		Offset:           kafka.OffsetEarliest,
-		Topics:           "topic0,topic1",
+		GroupId:          "exampleGroup" + gofast.UUIDGenNoHyphen(),
+		Offset:           kafka.OffsetLatest,
+		Topics:           topics,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	go func() {
-		nRecvs := 0
 		for {
 			msgs, err := consumer.Consume(context.Background())
 			if err != nil {
 				log.Printf("error when consumer ReadMessage: %v\n", err)
+				continue
 			}
-			_ = msgs[0]
-			nRecvs += 1
-			log.Printf("number of received messages: %v", nRecvs)
+			for _, msg := range msgs {
+				_ = msg
+			}
 		}
 	}()
-
-	nMsg := 360
-	for i := 0; i < nMsg; i++ {
-		producer.Produce(
-			"topic0",
-			"msg at "+time.Now().Format(time.RFC3339Nano),
-		)
-		time.Sleep(1 * time.Second)
-	}
-	time.Sleep(time.Duration(nMsg+100) * time.Second)
+	time.Sleep(99999 * time.Hour)
 }

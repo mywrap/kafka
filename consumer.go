@@ -94,6 +94,7 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 		go func() { // running session goroutine
 			log.Printf("started consuming session")
 			err := client.Consume(csm.stopCtx, topics, handler) // blocking
+			log.Debugf("client_Consume %v: %v", topics, err)
 			if err != nil {
 				handler.ssnEndedErr = fmt.Errorf("session ended: %v", err)
 				close(handler.ssnEndedChan) // sarama Consume stop (or stopCxl)
@@ -201,6 +202,8 @@ func (c Consumer) ReadMessage(ctx context.Context) ([]Message, error) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
+		// TODO: cluster rebalance can cause this
+		time.Sleep(500 * time.Millisecond)
 		return nil, ErrReturnEmptyMsgs // should be unreachable
 	}
 	return ret, nil

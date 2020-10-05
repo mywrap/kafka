@@ -55,7 +55,7 @@ type Consumer struct {
 // connecting fail)
 func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 	csm := &Consumer{mutex: &sync.Mutex{}, groupId: conf.GroupId, IsLog: true}
-	log.Condf(csm.IsLog, "creating a consumer with %#v", conf)
+	log.Printf("creating a consumer with %#v", conf)
 	csm.stopCtx, csm.stopCxl = context.WithCancel(context.Background())
 	samConf := sarama.NewConfig()
 	samConf.Consumer.Offsets.Initial = int64(conf.Offset)
@@ -68,9 +68,6 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 	runSession := func() *handlerImpl {
 		// close current handler
 		csm.mutex.Lock()
-		if csm.handler != nil && csm.handler.client != nil {
-			csm.handler.client.Close()
-		}
 		csm.handler = nil
 		csm.mutex.Unlock()
 
@@ -86,21 +83,21 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 		}
 		client, err := sarama.NewConsumerGroup(brokers, conf.GroupId, samConf)
 		if err != nil {
-			close(handler.ssnEndedChan) // create client fail
 			handler.ssnEndedErr = fmt.Errorf("create client: %v", err)
+			log.Printf("error %v", handler.ssnEndedErr)
+			close(handler.ssnEndedChan)
 			return handler
 		}
 		go func() {
 			for warn := range client.Errors() {
-				log.Condf(csm.IsLog, "error in consumer life: %v", warn)
+				log.Printf("error in consumer life: %v", warn)
 			}
 		}()
 		handler.client = client
-		log.Condf(csm.IsLog, "consumer's sarama client created")
 		go func() { // running session goroutine
-			log.Condf(csm.IsLog, "started consuming session")
+			log.Condf(csm.IsLog, "begin Consume session")
 			err := client.Consume(csm.stopCtx, topics, handler) // blocking
-			log.Condf(csm.IsLog, "client Consume cycle returned: %v", err)
+			log.Condf(csm.IsLog, "end Consume session: %v", err)
 			if err != nil {
 				handler.ssnEndedErr = fmt.Errorf("session ended: %v", err)
 				close(handler.ssnEndedChan) // sarama Consume stop (or stopCxl)
@@ -109,6 +106,8 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 				handler.ssnEndedErr = err
 				close(handler.ssnEndedChan) // brokers rebalance
 			}
+			closeErr := client.Close()
+			log.Printf("client Close: %v", closeErr)
 		}()
 		return handler
 	}
@@ -247,7 +246,7 @@ type handlerImpl struct {
 }
 
 func (h *handlerImpl) Setup(s sarama.ConsumerGroupSession) error {
-	log.Condf(h.consumer.IsLog,"joined consumer group, assigned partitions %#v", s.Claims())
+	log.Condf(h.consumer.IsLog, "joined consumer group, assigned partitions %#v", s.Claims())
 	h.mu.Lock()
 	h.readMsgChans = make(map[string](chan *partRequest))
 	for topic, parts := range s.Claims() {
@@ -267,12 +266,13 @@ func (h *handlerImpl) Cleanup(sarama.ConsumerGroupSession) error { return nil }
 func (h *handlerImpl) ConsumeClaim(
 	session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	partition := fmt.Sprintf("%v:%v", claim.Topic(), claim.Partition())
-	log.Condf(h.consumer.IsLog,"started ConsumeClaim partition %v", partition)
-	defer log.Condf(h.consumer.IsLog,"returned partition ConsumeClaim %v", partition)
+	log.Condf(h.consumer.IsLog, "begin ConsumeClaim partition %v", partition)
+	defer log.Condf(h.consumer.IsLog, "end partition ConsumeClaim %v", partition)
 	h.mu.RLock()
 	readMsgChan, ok := h.readMsgChans[partition]
 	h.mu.RUnlock()
 	if !ok { // should be unreachable, key has to be inited in func Setup
+		log.Debugf("end ConsumeClaim due to no readMsgChan")
 		return nil
 	}
 	for {
@@ -282,6 +282,7 @@ func (h *handlerImpl) ConsumeClaim(
 			select {
 			case samMsg, opening := <-claim.Messages():
 				if !opening { // cluster needs to be rebalanced
+					log.Debugf("end ConsumeClaim due to rebalance")
 					partReq.responseChan <- nil
 					return nil
 				}
@@ -299,7 +300,8 @@ func (h *handlerImpl) ConsumeClaim(
 			case <-partReq.ctx.Done(): //
 				partReq.responseChan <- nil
 			}
-		case <-h.ssnEndedChan: // included consumer stopped
+		case <-h.ssnEndedChan:
+			log.Debugf("end ConsumeClaim due to ssnEndedChan")
 			return nil
 		}
 	}

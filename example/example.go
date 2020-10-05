@@ -16,7 +16,15 @@ const brokers = "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092"
 const topics = "topicAlice,topicBob,topicCharlie"
 const topic0 = "topicAlice"
 
-func main1() { // producer
+func main() {
+	if !true {
+		mainProducer()
+	} else {
+		mainconsumer()
+	}
+}
+
+func mainProducer() {
 	producer, err := kafka.NewProducer(kafka.ProducerConfig{
 		BrokersList:  brokers,
 		RequiredAcks: kafka.WaitForAll,
@@ -35,7 +43,7 @@ func main1() { // producer
 	time.Sleep(2 * time.Second)
 }
 
-func main() { // consumer
+func mainconsumer() {
 	consumer, err := kafka.NewConsumer(kafka.ConsumerConfig{
 		BootstrapServers: brokers,
 		GroupId:          "exampleGroup1",
@@ -48,10 +56,10 @@ func main() { // consumer
 	}
 	go func() {
 		for i := 0; true; i++ {
-			log.Debugf("loop Consume round %v", i)
+			//log.Printf("loop Consume round %v", i)
 			msgs, err := consumer.Consume(context.Background())
 			if err != nil {
-				log.Printf("error when consumer ReadMessage: %v\n", err)
+				//log.Printf("error when consumer ReadMessage: %v\n", err)
 				continue
 			}
 			for _, msg := range msgs {

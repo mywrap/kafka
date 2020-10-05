@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,7 +12,9 @@ import (
 	"github.com/mywrap/metric"
 )
 
-var brokers = "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092"
+const brokersTest = "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092"
+
+//const brokersTest = "10.100.50.100:9092,10.100.50.101:9092,10.100.50.102:9092"
 
 // this test need a running kafka server,
 // example setup: https://github.com/daominah/zookafka
@@ -21,7 +24,7 @@ func Test_Kafka(t *testing.T) {
 	topic0 := fmt.Sprintf("topic_%v", gofast.UUIDGenNoHyphen()[:8])
 
 	producer, err := NewProducer(ProducerConfig{
-		BrokersList:  brokers,
+		BrokersList:  brokersTest,
 		RequiredAcks: WaitForAll,
 	})
 	if err != nil {
@@ -38,7 +41,7 @@ func Test_Kafka(t *testing.T) {
 	csmT0 := time.Now()
 	group0 := fmt.Sprintf("group_%v", gofast.UUIDGenNoHyphen()[:8])
 	consumer, err := NewConsumer(ConsumerConfig{
-		BootstrapServers: brokers,
+		BootstrapServers: brokersTest,
 		Topics:           topic0,
 		GroupId:          group0,
 		Offset:           OffsetEarliest,
@@ -54,6 +57,7 @@ func Test_Kafka(t *testing.T) {
 	rMetric := metric.NewMemoryMetric()
 	nReceived := 0
 	var csmT2 time.Time
+	mu := sync.Mutex{}
 	go func() {
 		for {
 			//t.Logf("about to consumer Consume")
@@ -67,7 +71,9 @@ func Test_Kafka(t *testing.T) {
 				rMetric.Count(fmt.Sprintf("%v:%v", msg.Topic, msg.Partition))
 			}
 			if nReceived == nMsgs {
+				mu.Lock()
 				csmT2 = time.Now()
+				mu.Unlock()
 			}
 			//t.Logf("nReceived: %v", nReceived)
 		}
@@ -103,8 +109,10 @@ func Test_Kafka(t *testing.T) {
 		t.Errorf("sent expected: %v, real: %v", nMsgs, nSent)
 	}
 
+	mu.Lock()
 	t.Logf("sent: %v, received: %v, durInit: %v, durRead: %v",
 		nSent, nReceived, csmT1.Sub(csmT0), csmT2.Sub(csmT1))
+	mu.Unlock()
 }
 
 func TestConsumer_Stop(t *testing.T) {
@@ -117,7 +125,7 @@ func TestConsumer_Reconnect(t *testing.T) {
 
 func TestConsumer_CancelConsume(t *testing.T) {
 	consumer, err := NewConsumer(ConsumerConfig{
-		BootstrapServers: brokers,
+		BootstrapServers: brokersTest,
 		Topics:           fmt.Sprintf("topic_%v", gofast.UUIDGen()),
 		GroupId:          fmt.Sprintf("group_%v", gofast.UUIDGen()),
 		Offset:           OffsetLatest,
@@ -138,7 +146,7 @@ func TestProducer_ProduceFail(t *testing.T) {
 // test on broker with message.max.bytes=1000000
 func TestProducer_Compress(t *testing.T) {
 	producerComp, err := NewProducer(ProducerConfig{
-		BrokersList:   brokers,
+		BrokersList:   brokersTest,
 		RequiredAcks:  WaitForLocal,
 		LogMaxLineLen: 120,
 		IsCompressed:  true,
@@ -148,7 +156,7 @@ func TestProducer_Compress(t *testing.T) {
 		t.Fatal(err)
 	}
 	producerNoComp, err := NewProducer(ProducerConfig{
-		BrokersList:   brokers,
+		BrokersList:   brokersTest,
 		RequiredAcks:  WaitForLocal,
 		LogMaxLineLen: 120,
 		MaxMsgBytes:   10 * 1048576, // client side limit, not important
@@ -193,7 +201,7 @@ func genMessage(size int) string {
 
 func TestProducer_ProduceJSON(t *testing.T) {
 	producer, err := NewProducer(ProducerConfig{
-		BrokersList: brokers, RequiredAcks: WaitForLocal})
+		BrokersList: brokersTest, RequiredAcks: WaitForLocal})
 	if err != nil {
 		t.Fatal(err)
 	}

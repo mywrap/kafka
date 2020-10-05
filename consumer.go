@@ -54,8 +54,8 @@ type Consumer struct {
 // NewConsumer init an auto reconnect Consumer (but return an error if the first
 // connecting fail)
 func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
-	log.Printf("creating a consumer with %#v", conf)
 	csm := &Consumer{mutex: &sync.Mutex{}, groupId: conf.GroupId, IsLog: true}
+	log.Condf(csm.IsLog, "creating a consumer with %#v", conf)
 	csm.stopCtx, csm.stopCxl = context.WithCancel(context.Background())
 	samConf := sarama.NewConfig()
 	samConf.Consumer.Offsets.Initial = int64(conf.Offset)
@@ -63,6 +63,7 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 	samConf.Version = kafkaVersion
 	brokers := strings.Split(conf.BootstrapServers, ",")
 	topics := strings.Split(conf.Topics, ",")
+	samConf.Consumer.Return.Errors = true
 
 	runSession := func() *handlerImpl {
 		// close current handler
@@ -89,12 +90,17 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 			handler.ssnEndedErr = fmt.Errorf("create client: %v", err)
 			return handler
 		}
+		go func() {
+			for warn := range client.Errors() {
+				log.Condf(csm.IsLog, "error in consumer life: %v", warn)
+			}
+		}()
 		handler.client = client
-		log.Printf("consumer's sarama client created")
+		log.Condf(csm.IsLog, "consumer's sarama client created")
 		go func() { // running session goroutine
-			log.Printf("started consuming session")
+			log.Condf(csm.IsLog, "started consuming session")
 			err := client.Consume(csm.stopCtx, topics, handler) // blocking
-			log.Debugf("client_Consume %v: %v", topics, err)
+			log.Condf(csm.IsLog, "client Consume cycle returned: %v", err)
 			if err != nil {
 				handler.ssnEndedErr = fmt.Errorf("session ended: %v", err)
 				close(handler.ssnEndedChan) // sarama Consume stop (or stopCxl)
@@ -103,7 +109,6 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 				handler.ssnEndedErr = err
 				close(handler.ssnEndedChan) // brokers rebalance
 			}
-			log.Printf("returned consuming session: %v", err)
 		}()
 		return handler
 	}
@@ -138,17 +143,29 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 			}
 		}
 	}()
-	log.Printf("connected to kafka cluster %v", conf.BootstrapServers)
+	log.Condf(csm.IsLog, "connected to kafka cluster %v", conf.BootstrapServers)
 	return csm, nil
 }
 
+// Consume blocks until it receives at least one message or an error occurred,
+// sleep for a duration if error is from Kafka servers
 func (c Consumer) Consume(ctx context.Context) ([]Message, error) {
-	return c.ReadMessage(ctx)
+	msgs, err := c.consume(ctx)
+	if err != nil && ctx.Err() == nil { // brokers err, should back off a duration
+		time.Sleep(1 * time.Second)
+	}
+	return msgs, err
 }
 
-// ReadMessage block until it receives at least one message or an error occurred.
+// ReadMessage blocks until it receives at least one message or an error occurred,
+// sleep for a duration if error is from Kafka servers.
 // Deprecated: use Consume instead
 func (c Consumer) ReadMessage(ctx context.Context) ([]Message, error) {
+	return c.Consume(ctx)
+}
+
+// ReadMessage block until it receives at least one message or an error occurred
+func (c Consumer) consume(ctx context.Context) ([]Message, error) {
 	if c.stopCtx.Err() != nil {
 		return nil, ErrConsumerStopped
 	}
@@ -181,6 +198,8 @@ func (c Consumer) ReadMessage(ctx context.Context) ([]Message, error) {
 		partitionChan := partitionChan // local var for goroutines
 		wg.Add(1)
 		go func() {
+			//log.Debugf("begin send read req to partitionChan")
+			//defer log.Debugf("end send read req to partitionChan")
 			defer wg.Add(-1)
 			select {
 			case <-ctx.Done(): // caller of ReadMessage cancels
@@ -196,14 +215,15 @@ func (c Consumer) ReadMessage(ctx context.Context) ([]Message, error) {
 			}
 		}()
 	}
+	// TODO: handle leaderless partition
+	//log.Debugf("before Consume wait")
 	wg.Wait()
+	//log.Debugf("after Consume wait")
 	firstMsgCxl()
 	if len(ret) == 0 {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		// TODO: cluster rebalance can cause this
-		time.Sleep(500 * time.Millisecond)
 		return nil, ErrReturnEmptyMsgs // should be unreachable
 	}
 	return ret, nil
@@ -227,7 +247,7 @@ type handlerImpl struct {
 }
 
 func (h *handlerImpl) Setup(s sarama.ConsumerGroupSession) error {
-	log.Printf("joined consumer group, assigned partitions %#v", s.Claims())
+	log.Condf(h.consumer.IsLog,"joined consumer group, assigned partitions %#v", s.Claims())
 	h.mu.Lock()
 	h.readMsgChans = make(map[string](chan *partRequest))
 	for topic, parts := range s.Claims() {
@@ -247,8 +267,8 @@ func (h *handlerImpl) Cleanup(sarama.ConsumerGroupSession) error { return nil }
 func (h *handlerImpl) ConsumeClaim(
 	session sarama.ConsumerGroupSession, claim sarama.ConsumerGroupClaim) error {
 	partition := fmt.Sprintf("%v:%v", claim.Topic(), claim.Partition())
-	log.Printf("started ConsumeClaim partition %v", partition)
-	defer log.Printf("returned partition ConsumeClaim %v", partition)
+	log.Condf(h.consumer.IsLog,"started ConsumeClaim partition %v", partition)
+	defer log.Condf(h.consumer.IsLog,"returned partition ConsumeClaim %v", partition)
 	h.mu.RLock()
 	readMsgChan, ok := h.readMsgChans[partition]
 	h.mu.RUnlock()
@@ -273,8 +293,7 @@ func (h *handlerImpl) ConsumeClaim(
 				msg := &Message{Value: string(samMsg.Value), Offset: samMsg.Offset,
 					Topic: samMsg.Topic, Partition: samMsg.Partition,
 					Key: string(samMsg.Key), Timestamp: samMsg.Timestamp}
-				log.Condf(h.consumer.IsLog,
-					"received a message from topic %v:%v:%v: %v",
+				log.Condf(h.consumer.IsLog, "received from topic %v:%v:%v: %v",
 					msg.Topic, msg.Partition, msg.Offset, msg.Value)
 				partReq.responseChan <- msg // take care of blocking
 			case <-partReq.ctx.Done(): //
@@ -304,5 +323,5 @@ const (
 var (
 	ErrConsumerStopped = errors.New("consumer stopped")
 	ErrNilHandler      = errors.New("session is starting, try again")
-	ErrReturnEmptyMsgs = errors.New("something went wrong, empty return")
+	ErrReturnEmptyMsgs = errors.New("empty return, may be partition is rebalancing")
 )

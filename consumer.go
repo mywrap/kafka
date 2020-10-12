@@ -42,7 +42,8 @@ type Consumer struct {
 	// stop partition receiving message loops (func ConsumeClaim)
 	stopCxl context.CancelFunc
 	stopCtx context.Context // correspond to stopCxl
-	// consumer's handler will only be changed func runSession,
+	client  sarama.ConsumerGroup
+	// consumer's handler will only be changed in func runSession,
 	// it will be nil while a new session is initializing
 	handler *handlerImpl
 	mutex   *sync.Mutex // protect handler
@@ -65,13 +66,24 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 	topics := strings.Split(conf.Topics, ",")
 	samConf.Consumer.Return.Errors = true
 
+	client, err := sarama.NewConsumerGroup(brokers, conf.GroupId, samConf)
+	if err != nil {
+		return nil, fmt.Errorf("init sarama client: %v", err)
+	}
+	csm.client = client
+
+	go func() {
+		for warn := range client.Errors() {
+			log.Printf("error in consumer life cycle: %v", warn)
+		}
+	}()
+
 	runSession := func() *handlerImpl {
-		// close current handler
 		csm.mutex.Lock()
 		csm.handler = nil
 		csm.mutex.Unlock()
 
-		// create new client, new handler, new session
+		// create a new handler for new session
 		handler := &handlerImpl{
 			readyChan:    make(chan bool),
 			ssnEndedChan: make(chan bool),
@@ -81,19 +93,7 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 			client:       nil,
 			mu:           &sync.RWMutex{},
 		}
-		client, err := sarama.NewConsumerGroup(brokers, conf.GroupId, samConf)
-		if err != nil {
-			handler.ssnEndedErr = fmt.Errorf("create client: %v", err)
-			log.Printf("error %v", handler.ssnEndedErr)
-			close(handler.ssnEndedChan)
-			return handler
-		}
-		go func() {
-			for warn := range client.Errors() {
-				log.Printf("error in consumer life: %v", warn)
-			}
-		}()
-		handler.client = client
+
 		go func() { // running session goroutine
 			log.Condf(csm.IsLog, "begin Consume session")
 			err := client.Consume(csm.stopCtx, topics, handler) // blocking
@@ -106,14 +106,12 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 				handler.ssnEndedErr = err
 				close(handler.ssnEndedChan) // brokers rebalance
 			}
-			closeErr := client.Close()
-			log.Printf("client Close: %v", closeErr)
 		}()
 		return handler
 	}
 
-	// the first runSession to the cluster, will not retry on error
-	{ // limit var handler scope
+	// the first runSession, will not retry on error
+	{
 		handler := runSession()
 		select {
 		case <-handler.ssnEndedChan:
@@ -229,7 +227,11 @@ func (c Consumer) consume(ctx context.Context) ([]Message, error) {
 }
 
 // Stop needs to release all resources of the consumer
-func (c *Consumer) Stop() { c.stopCxl() }
+func (c *Consumer) Stop() {
+	c.stopCxl()
+	closeErr := c.client.Close()
+	log.Printf("client Close: %v", closeErr)
+}
 
 type handlerImpl struct {
 	// will be closed at returning of func consumerGroupHandler_Setup

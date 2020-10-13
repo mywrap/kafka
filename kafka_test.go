@@ -87,7 +87,7 @@ func Test_Kafka(t *testing.T) {
 		}
 		producer.Produce(topic0, msg)
 	}
-	time.Sleep(1 * time.Second) // wait for consumer
+	time.Sleep(2 * time.Second) // wait for consumer
 
 	t.Logf("consumer group: %v", consumer.groupId)
 	for _, v := range rMetric.GetCurrentMetric() {

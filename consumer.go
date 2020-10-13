@@ -140,6 +140,8 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 			}
 		}
 	}()
+	// wait for ConsumeClaim start, TODO: better logic here
+	time.Sleep(200 * time.Millisecond)
 	log.Condf(csm.IsLog, "connected to kafka cluster %v", conf.BootstrapServers)
 	return csm, nil
 }
@@ -251,12 +253,6 @@ func (h *handlerImpl) Setup(s sarama.ConsumerGroupSession) error {
 	log.Condf(h.consumer.IsLog, "joined consumer group, assigned partitions %#v", s.Claims())
 	h.mu.Lock()
 	h.readMsgChans = make(map[string](chan *partRequest))
-	for topic, parts := range s.Claims() {
-		for _, part := range parts {
-			h.readMsgChans[fmt.Sprintf("%v:%v", topic, part)] =
-				make(chan *partRequest)
-		}
-	}
 	h.mu.Unlock()
 	close(h.readyChan)
 	return nil
@@ -270,13 +266,14 @@ func (h *handlerImpl) ConsumeClaim(
 	partition := fmt.Sprintf("%v:%v", claim.Topic(), claim.Partition())
 	log.Condf(h.consumer.IsLog, "begin ConsumeClaim partition %v", partition)
 	defer log.Condf(h.consumer.IsLog, "end partition ConsumeClaim %v", partition)
-	h.mu.RLock()
+	h.mu.Lock()
 	readMsgChan, ok := h.readMsgChans[partition]
-	h.mu.RUnlock()
-	if !ok { // should be unreachable, key has to be inited in func Setup
-		log.Debugf("end ConsumeClaim due to no readMsgChan")
-		return nil
+	if !ok {
+		h.readMsgChans[partition] = make(chan *partRequest)
+		readMsgChan = h.readMsgChans[partition]
 	}
+	h.mu.Unlock()
+
 	for {
 		select {
 		case partReq := <-readMsgChan:

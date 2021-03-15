@@ -46,6 +46,8 @@ func NewProducer(conf ProducerConfig) (*Producer, error) {
 	log.Infof("creating a producer with %#v", conf)
 	// construct sarama config
 	samConf := sarama.NewConfig()
+	kafkaVersion, _ := sarama.ParseKafkaVersion("1.1.1")
+	samConf.Version = kafkaVersion
 	samConf.Producer.RequiredAcks = sarama.RequiredAcks(conf.RequiredAcks)
 	samConf.Producer.Retry.Max = 5
 	samConf.Producer.Retry.BackoffFunc = func(retries, maxRetries int) time.Duration {
@@ -123,9 +125,10 @@ func (p Producer) ProduceWithKey(topic string, message string, key string) error
 func (p Producer) SendExplicitMessage(topic string, value string, key string) error {
 	msgMeta := MsgMetadata{UniqueId: gofast.GenUUID(), SentAt: time.Now()}
 	samMsg := &sarama.ProducerMessage{
-		Value:    sarama.StringEncoder(value),
-		Topic:    topic,
-		Metadata: msgMeta,
+		Value:     sarama.StringEncoder(value),
+		Topic:     topic,
+		Metadata:  msgMeta,
+		Timestamp: time.Now(),
 	}
 	if key != "" {
 		samMsg.Key = sarama.StringEncoder(key)

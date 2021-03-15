@@ -2,27 +2,23 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"math/rand"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/mywrap/gofast"
 	"github.com/mywrap/kafka"
 	"github.com/mywrap/log"
+	"github.com/mywrap/metric"
 )
 
-const brokers = "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092"
+const brokers = "127.0.0.1:9092"
 
-//const brokers = "10.100.50.100:9092,10.100.50.101:9092,10.100.50.102:9092"
-
-const topics = "topicAlice,topicBob,topicCharlie"
-const topic0 = "topicAlice"
-
-func main() {
-	if !true {
-		mainProducer()
-	} else {
-		mainconsumer()
-	}
-}
+const topicR = "tuxedo"
+const topicW = "topicW0"
 
 func mainProducer() {
 	producer, err := kafka.NewProducer(kafka.ProducerConfig{
@@ -32,40 +28,61 @@ func mainProducer() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	_ = strings.Split
-	//produceTo := strings.Split(topics, ",")
-	produceTo := []string{topic0}
-	for _, topic := range produceTo {
-		for i := 0; i < 3; i++ {
-			producer.Produce(topic, "PING"+time.Now().Format(time.RFC3339Nano))
-		}
+
+	for i := 0; i < 10; i++ {
+		_ = rand.Int63n
+		//time.Sleep(time.Duration(rand.Int63n(40)) * time.Millisecond)
+		producer.ProduceJSON(topicR, M{
+			"messageType": "REQUEST",
+			"messageId":   fmt.Sprintf("%v_%v", time.Now().UnixNano(), gofast.UUIDGen()),
+			"uri":         "/api/v1/equity/order/history",
+			"responseDestination": M{
+				"topic": topicW, "uri": "REQUEST_RESPONSE"},
+			"data": M{"key0": "val0"},
+		})
 	}
-	time.Sleep(2 * time.Second)
+	time.Sleep(10 * time.Second)
 }
 
-func mainconsumer() {
+func mainConsumer() {
+	met := metric.NewMemoryMetric()
 	consumer, err := kafka.NewConsumer(kafka.ConsumerConfig{
 		BootstrapServers: brokers,
-		GroupId:          "exampleGroup1",
+		GroupId:          "exampleGroup3",
 		Offset:           kafka.OffsetEarliest,
-		//Topics:           topics,
-		Topics: topic0,
+		Topics:           topicR,
+		//Topics:           topicW,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 	go func() {
 		for i := 0; true; i++ {
-			//log.Printf("loop Consume round %v", i)
 			msgs, err := consumer.Consume(context.Background())
 			if err != nil {
 				//log.Printf("error when consumer ReadMessage: %v\n", err)
 				continue
 			}
 			for _, msg := range msgs {
-				_ = msg // do something
+				var x XMsg
+				_ = json.Unmarshal([]byte(msg.Value), &x)
+				tmpIdx := strings.Index(x.MessageId, "_")
+				beginT, _ := strconv.ParseInt(x.MessageId[:tmpIdx], 10, 64)
+				met.Count("all")
+				met.Duration("all", time.Duration(time.Now().UnixNano()-beginT))
+				log.Debugf("%#v", met.GetCurrentMetric())
 			}
 		}
 	}()
-	time.Sleep(99999 * time.Hour)
+	time.Sleep(time.Hour)
+}
+
+type M map[string]interface{}
+type A []interface{}
+
+type XMsg struct{ MessageId string }
+
+func main() {
+	//mainProducer()
+	mainConsumer()
 }

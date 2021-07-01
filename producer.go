@@ -115,11 +115,6 @@ func truncateStr(s string, limit int) string {
 	return s[:limit]
 }
 
-// ProduceWithKey sends messages have a same key to same partition.
-func (p Producer) ProduceWithKey(topic string, message string, key string) error {
-	return p.SendExplicitMessage(topic, message, key)
-}
-
 // SendExplicitMessage _
 // Deprecated: use ProduceWithKey instead
 func (p Producer) SendExplicitMessage(topic string, value string, key string) error {
@@ -153,25 +148,39 @@ func (p Producer) SendExplicitMessage(topic string, value string, key string) er
 	return err
 }
 
-// Produce sends input message to Kafka clusters.
-// This func only return timeout error, other errors will be log by the Producer
-func (p Producer) Produce(topic string, msg string) error {
-	return p.SendMessage(topic, msg)
+// ProduceJSON do JSON the object then sends JSONed string to Kafka clusters,
+// in most cases you only need this func
+func (p Producer) ProduceJSON(topic string, object interface{}) error {
+	return p.ProduceJSONWithKey(topic, object, "")
 }
 
-func (p Producer) ProduceJSON(topic string, object interface{}) error {
+// ProduceJSON do JSON the object then sends JSONed string to Kafka clusters,
+// messages have the same key will be sent to the same partition
+func (p Producer) ProduceJSONWithKey(
+	topic string, object interface{}, kafkaKey string) error {
 	switch v := object.(type) {
 	case string:
-		return p.Produce(topic, v)
+		return p.ProduceWithKey(topic, v, kafkaKey)
 	case []byte:
-		return p.Produce(topic, string(v))
+		return p.ProduceWithKey(topic, string(v), kafkaKey)
 	default:
 		beauty, err := json.Marshal(v)
 		if err != nil {
 			return err
 		}
-		return p.Produce(topic, string(beauty))
+		return p.ProduceWithKey(topic, string(beauty), kafkaKey)
 	}
+}
+
+// Produce sends input message to Kafka clusters.
+// This func only return timeout error, other errors will be log by the Producer
+func (p Producer) Produce(topic string, msg string) error {
+	return p.SendExplicitMessage(topic, msg, "")
+}
+
+// ProduceWithKey sends messages have a same key to same partition.
+func (p Producer) ProduceWithKey(topic string, message string, key string) error {
+	return p.SendExplicitMessage(topic, message, key)
 }
 
 // Deprecated: use Produce instead

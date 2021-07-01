@@ -315,7 +315,7 @@ type partRequest struct {
 // Offset configs the consumer
 type Offset int64
 
-// Initial offset if consumer group does not have a valid committed offset
+// Initial offset IF consumer group does not have a valid committed offset
 const (
 	OffsetEarliest = Offset(sarama.OffsetOldest)
 	OffsetLatest   = Offset(sarama.OffsetNewest)

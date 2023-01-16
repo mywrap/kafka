@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"math/rand"
 	"time"
 
@@ -40,14 +39,14 @@ func mainConsumer() {
 		Offset:           kafka.OffsetEarliest,
 		Topics:           "TestTopic0",
 	})
-	consumer.IsLog = false
 	if err != nil {
 		log.Fatal(err)
 	}
 	for {
-		msgs, err := consumer.Consume(context.Background())
+		msgs, err := consumer.Consume()
 		if err != nil {
-			//log.Printf("error when consumer ReadMessage: %v\n", err)
+			log.Printf("error when consumer ReadMessage: %v\n", err)
+			time.Sleep(1 * time.Second)
 			continue
 		}
 		for _, msg := range msgs {

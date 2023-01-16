@@ -1,7 +1,10 @@
-# pkg name
+# Kafka client
 
-An easy-to-use, pure go kafka client.  
+This package is an easy-to-use Kafka client (written in pure Go).  
+
 Wrapped [Shopify/sarama](https://github.com/Shopify/sarama).
+
+[Apache Kafka glossary](https://docs.confluent.io/kafka/introduction.html#topics).
 
 ## Usage
 

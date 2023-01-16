@@ -1,7 +1,6 @@
 package kafka
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -14,7 +13,7 @@ import (
 
 //const brokersTest = "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092"
 //const brokersTest = "10.100.50.100:9092,10.100.50.101:9092,10.100.50.102:9092"
-const brokersTest = "127.0.0.1:9092"
+const brokersTest = "172.31.245.221:9092"
 
 // this test need a running kafka server,
 // example setup: https://github.com/daominah/zookafka
@@ -31,11 +30,13 @@ func Test_Kafka(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	producer.Produce("", "msg to empty topic")
+	producer.Produce("", "msg to invalid topic")
 	time.Sleep(10 * time.Millisecond)
 	_, nErrors := producer.getNumberOfSuccessError()
 	if nErrors != 1 {
 		t.Errorf("expected 1 fail but nFails = %v", nErrors)
+	} else {
+		t.Logf("pass test invalid topic")
 	}
 
 	csmT0 := time.Now()
@@ -52,8 +53,7 @@ func Test_Kafka(t *testing.T) {
 	csmT1 := time.Now()
 
 	producer.conf.DisableLog = true
-	consumer.IsLog = false
-	nMsgs := 1000
+	const nMsgs = 1000
 	rMetric := metric.NewMemoryMetric()
 	nReceived := 0
 	var csmT2 time.Time
@@ -61,7 +61,7 @@ func Test_Kafka(t *testing.T) {
 	go func() {
 		for {
 			//t.Logf("about to consumer Consume")
-			msgs, err := consumer.Consume(context.Background())
+			msgs, err := consumer.Consume()
 			if err != nil {
 				t.Errorf("error when consumer Consume: %v", err)
 				continue
@@ -80,7 +80,7 @@ func Test_Kafka(t *testing.T) {
 	}()
 
 	for i := 0; i < nMsgs; i++ {
-		msg := "msg at " + time.Now().Format(time.RFC3339Nano)
+		msg := "msg i %03d at " + time.Now().Format(time.RFC3339Nano)
 		if i > 8*nMsgs/10 {
 			producer.ProduceWithKey(topic0, msg, "key810")
 			continue
@@ -89,9 +89,9 @@ func Test_Kafka(t *testing.T) {
 	}
 	time.Sleep(2 * time.Second) // wait for consumer
 
-	t.Logf("consumer group: %v", consumer.groupId)
+	t.Logf("consumer group: %v", group0)
 	for _, v := range rMetric.GetCurrentMetric() {
-		t.Logf("consumer met key: %v, count: %v", v.Key, v.RequestCount)
+		t.Logf("consumer metric key: %v, count: %v", v.Key, v.RequestCount)
 	}
 	if nReceived != nMsgs {
 		t.Errorf("received expected: %v, real: %v", nMsgs, nReceived)
@@ -100,7 +100,7 @@ func Test_Kafka(t *testing.T) {
 	//t.Logf("%#v", producer.MetricSuccess.GetCurrentMetric())
 	nSent := 0
 	for _, v := range producer.MetricSuccess.GetCurrentMetric() {
-		t.Logf("producer met key: %v, count: %v", v.Key, v.RequestCount)
+		t.Logf("producer metric key: %v, count: %v", v.Key, v.RequestCount)
 		if strings.Contains(v.Key, "success") {
 			nSent += v.RequestCount
 		}
@@ -115,28 +115,8 @@ func Test_Kafka(t *testing.T) {
 	mu.Unlock()
 }
 
-func TestConsumer_Stop(t *testing.T) {
-	// TODO: TestConsumer_Stop
-}
-
 func TestConsumer_Reconnect(t *testing.T) {
 	// TODO: TestConsumer_Reconnect
-}
-
-func TestConsumer_CancelConsume(t *testing.T) {
-	consumer, err := NewConsumer(ConsumerConfig{
-		BootstrapServers: brokersTest,
-		Topics:           fmt.Sprintf("topic_%v", gofast.UUIDGen()),
-		GroupId:          fmt.Sprintf("group_%v", gofast.UUIDGen()),
-		Offset:           OffsetLatest,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cxl := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	_, err = consumer.Consume(ctx)
-	t.Log(err)
-	cxl()
 }
 
 func TestProducer_ProduceFail(t *testing.T) {
@@ -205,7 +185,6 @@ func TestProducer_ProduceJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	type MsgType1 struct {
 		Field0 string
 		Field1 []byte
@@ -214,18 +193,16 @@ func TestProducer_ProduceJSON(t *testing.T) {
 		Field0 bool
 		Field1 func(a ...interface{}) (n int, err error)
 	}
-	for _, c := range []struct {
-		msg   interface{}
-		isErr bool
-	}{
-		{"msg string", false},
-		{MsgType1{Field0: "I miss", Field1: []byte("no one")}, false},
-		{MsgType2{Field1: fmt.Println}, true},
+	for _, msg := range []interface{}{
+		"msg string",
+		MsgType1{Field0: "I miss", Field1: []byte("no one")},
+		MsgType2{Field1: fmt.Println},
 	} {
-		err := producer.ProduceJSON("topic2", c.msg)
-		if (err != nil) != c.isErr {
-			t.Errorf("unexpected ProduceJSON: err: %v, msg: %v", err, c.msg)
-		}
+		producer.ProduceJSON("topic2", msg)
 	}
 	time.Sleep(100 * time.Millisecond)
+	nSuccesses, _ := producer.getNumberOfSuccessError()
+	if nSuccesses != 2 {
+		t.Errorf("nSuccesses got: %v, but want %v", nSuccesses, 2)
+	}
 }

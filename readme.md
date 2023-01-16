@@ -4,45 +4,70 @@ This package is an easy-to-use Kafka client (written in pure Go).
 
 Wrapped [Shopify/sarama](https://github.com/Shopify/sarama).
 
-[Apache Kafka glossary](https://docs.confluent.io/kafka/introduction.html#topics).
-
 ## Usage
 
 * Producer:
 
 ````go
-brokers := "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092"
+	producer, err := kafka.NewProducer(kafka.ProducerConfig{
+		BrokersList:  "127.0.0.1:9092",
+		RequiredAcks: kafka.WaitForLocal,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	producer.ProduceJSON("TestTopic0", map[string]interface{}{
+		"key0": "val0",
+		"key1": map[string]string{"nestedKey": "nestedVal"},
+	})
 
-producer, err := kafka.NewProducer(kafka.ProducerConfig{
-    BrokersList:  brokers,
-    RequiredAcks: kafka.WaitForAll, // consistency vs performance
-})
-if err != nil {
-    log.Fatal(err)
-}
-producer.Produce("topic1", "PING")
-// log: delivered msgId d151f0ab} to topic topic1:0:2
+	// func producer.Produce is non-blocking, if main return before messages are
+	// flushed, you may lose messages, so you need to call producer.Close()
+	producer.Close()
+
+	// Output:
+	// creating a producer with kafka.ProducerConfig{BrokersList:"127.0.0.1:9092", RequiredAcks:"WaitForLocal", IsCompressed:false, MaxMsgBytes:0, DisableLog:false, LogMaxLineLen:0}
+	// connected to kafka cluster 127.0.0.1:9092
+	// producing msgId 195f249a90f677067babf4a30daeadb0 to TestTopic0:: msg: {"key0":"val0","key1":{"nestedKey":"nestedVal"}}
+	// delivered msgId {195f249a90f677067babf4a30daeadb0 2023-01-16 22:03:55.62695678 +0700 +07 m=+0.100497028} to topic TestTopic0:0:52
 ````
 
 * Consumer:
 
 ````go
-consumer, err := kafka.NewConsumer(kafka.ConsumerConfig{
-    BootstrapServers: brokers,
-    GroupId:          "group0",
-    // only meaningful if group0 has never committed an offset
-    Offset:           kafka.OffsetEarliest, 
-    Topics:           "topic0,topic1",
-})
-if err != nil {
-    log.Fatal(err)
-}
-
-ctx, cxl := context.WithCancel(context.Background())
-msg, err := consumer.Consume() // auto commit offset, but not guarantee
-if err != nil {
-    log.Printf("error when consumer Consume: %v\n", err)
-}
-process(msg)
-// call cxl() to stop Consume at anytime
+    consumer, err := kafka.NewConsumer(kafka.ConsumerConfig{
+		BootstrapServers: "127.0.0.1:9092",
+		GroupId:          "TestGroup0",
+		Offset:           kafka.OffsetEarliest, // only meaningful if this GroupId has never committed an offset
+		Topics:           "TestTopic0,TestTopic1",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	for {
+		msgs, err := consumer.Consume()
+		if err != nil {
+			log.Printf("error when consumer ReadMessage: %v\n", err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		for _, msg := range msgs {
+			log.Printf("msg created at %v: %v", msg.Timestamp, msg.Value)
+		}
+	}
 ````
+
+## References
+
+* [Apache Kafka glossary](https://docs.confluent.io/kafka/introduction.html#topics).
+
+* Origin [sarama](https://github.com/Shopify/sarama/blob/v1.36.0/examples/consumergroup/main.go) consumer example.
+
+* [Broker configs](https://kafka.apache.org/documentation/#brokerconfigs_default.replication.factor). Some notable configs:
+  
+  * [min.insync.replicas](https://kafka.apache.org/documentation/#brokerconfigs_min.insync.replicas): when a producer sets acks to "all", min.insync.replicas specifies the minimum number of replicas that must acknowledge a write for the write to be considered successful
+  * [message.max.bytes](https://kafka.apache.org/documentation/#brokerconfigs_message.max.bytes): max message size, default 1MiB (Producer client should know this) 
+  * [num.partitions](https://kafka.apache.org/documentation/#brokerconfigs_num.partitions): the default number of log partitions per topic (Consumer client should know this) 
+  * [default.replication.factor](https://kafka.apache.org/documentation/#brokerconfigs_default.replication.factor)
+
+  Example [a production server config](https://kafka.apache.org/documentation/#prodconfig) 

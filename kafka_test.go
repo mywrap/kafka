@@ -13,7 +13,7 @@ import (
 
 //const brokersTest = "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092"
 //const brokersTest = "10.100.50.100:9092,10.100.50.101:9092,10.100.50.102:9092"
-const brokersTest = "172.31.245.221:9092"
+const brokersTest = "127.0.0.1:9092"
 
 // this test need a running kafka server,
 // example setup: https://github.com/daominah/zookafka
@@ -115,12 +115,8 @@ func Test_Kafka(t *testing.T) {
 	mu.Unlock()
 }
 
-func TestConsumer_Reconnect(t *testing.T) {
-	// TODO: TestConsumer_Reconnect
-}
+func TestConsumer_Rebalance(t *testing.T) {
 
-func TestProducer_ProduceFail(t *testing.T) {
-	// TODO: TestProducer_ProduceFail
 }
 
 // test on broker with message.max.bytes=1000000
@@ -151,7 +147,7 @@ func TestProducer_Compress(t *testing.T) {
 	t.Logf("producerCompress__________________________________________ ")
 	producerComp.Produce(topi2, msg2MB) // expect succeed
 	producerComp.Produce(topi2, msg5MB) // expect fail
-	time.Sleep(1500 * time.Millisecond)
+	producerComp.Close()
 	ns, ne := producerComp.getNumberOfSuccessError()
 	if ns != 1 || ne != 1 {
 		t.Logf("error producerComp nSuccesses: %v, nErrors: %v", ns, ne)
@@ -159,7 +155,7 @@ func TestProducer_Compress(t *testing.T) {
 	t.Logf("producerNoCompress_________________________________________")
 	producerNoComp.Produce(topi2, msg2MB) // expect fail
 	producerNoComp.Produce(topi2, msg5MB) // expect fail
-	time.Sleep(1500 * time.Millisecond)
+	producerNoComp.Close()
 	ns, ne = producerNoComp.getNumberOfSuccessError()
 	if ns != 0 || ne != 2 {
 		t.Logf("error producerComp nSuccesses: %v, nErrors: %v", ns, ne)
@@ -200,7 +196,7 @@ func TestProducer_ProduceJSON(t *testing.T) {
 	} {
 		producer.ProduceJSON("topic2", msg)
 	}
-	time.Sleep(100 * time.Millisecond)
+	producer.Close()
 	nSuccesses, _ := producer.getNumberOfSuccessError()
 	if nSuccesses != 2 {
 		t.Errorf("nSuccesses got: %v, but want %v", nSuccesses, 2)

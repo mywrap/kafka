@@ -1,7 +1,6 @@
 package main
 
 import (
-	"math/rand"
 	"time"
 
 	"github.com/mywrap/kafka"
@@ -13,31 +12,29 @@ var brokers = "127.0.0.1:9092"
 func mainProducer() {
 	producer, err := kafka.NewProducer(kafka.ProducerConfig{
 		BrokersList:  brokers,
-		RequiredAcks: kafka.WaitForAll,
+		RequiredAcks: kafka.WaitForLocal,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
+	producer.ProduceJSON("TestTopic0", map[string]interface{}{
+		"key0": "val0",
+		"key1": map[string]string{"nestedKey": "nestedVal"},
+	})
 
-	for i := 0; i < 3; i++ {
-		if i > 0 {
-			time.Sleep(time.Duration(rand.Int63n(100)) * time.Millisecond)
-		}
-		producer.ProduceJSON("TestTopic0", map[string]interface{}{
-			"header": "header0",
-			"data":   map[string]string{"key0": "val0"},
-		})
-	}
-	time.Sleep(3 * time.Second)
-	log.Debugf("producer metric: %#v", producer.MetricSuccess.GetCurrentMetric())
+	// func producer.Produce is non-blocking, if main return before messages are
+	// flushed, you may lose messages, so you need to call producer.Close()
+	producer.Close()
+
+	log.Printf("producer metric: %+v", producer.MetricSuccess.GetCurrentMetric())
 }
 
 func mainConsumer() {
 	consumer, err := kafka.NewConsumer(kafka.ConsumerConfig{
 		BootstrapServers: brokers,
-		GroupId:          "TestGroup5",
-		Offset:           kafka.OffsetEarliest,
-		Topics:           "TestTopic0",
+		GroupId:          "TestGroup1",
+		Offset:           kafka.OffsetEarliest, // only meaningful if this GroupId has never committed an offset
+		Topics:           "TestTopic0,TestTopic1",
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -50,12 +47,12 @@ func mainConsumer() {
 			continue
 		}
 		for _, msg := range msgs {
-			log.Debugf("msg created at %v: %v", msg.Timestamp, msg.Value)
+			log.Printf("msg created at %v: %v", msg.Timestamp, msg.Value)
 		}
 	}
 }
 
 func main() {
-	//mainProducer()
-	mainConsumer()
+	mainProducer()
+	//mainConsumer()
 }

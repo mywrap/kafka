@@ -2,6 +2,7 @@ package kafka
 
 import (
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -23,8 +24,8 @@ type ProducerConfig struct {
 	// the following configs are optional
 
 	IsCompressed bool // if true, producer will use gzip level BestCompression
-	// size before compress, default 1000000,
-	// should <= broker's message.max.bytes after compressed
+	// message size before compress in bytes, default 1000000,
+	// should be set smaller than server config "message.max.bytes" after compressed
 	MaxMsgBytes   int
 	DisableLog    bool // default enable log on produced and delivered a message
 	LogMaxLineLen int  // default no limit (can log a very large message)
@@ -32,10 +33,12 @@ type ProducerConfig struct {
 
 // Producer _
 type Producer struct {
-	samProducer   sarama.AsyncProducer
-	conf          ProducerConfig
-	MetricSuccess metric.Metric
-	MetricError   metric.Metric
+	conf           ProducerConfig
+	MetricSuccess  metric.Metric
+	MetricError    metric.Metric
+	samProducer    sarama.AsyncProducer
+	ctxSuccessDone <-chan struct{} // handle closing sarama.AsyncProducer
+	ctxErrorDone   <-chan struct{} // handle closing sarama.AsyncProducer
 }
 
 // NewProducer returns a connected Producer
@@ -78,6 +81,9 @@ func NewProducer(conf ProducerConfig) (*Producer, error) {
 		return nil, fmt.Errorf("error create producer: %v", err)
 	}
 	log.Infof("connected to kafka cluster %v", conf.BrokersList)
+
+	ctxErrorsClosed, cclErrorsClosed := context.WithCancel(context.Background())
+	p.ctxErrorDone = ctxErrorsClosed.Done()
 	go func() {
 		for err := range p.samProducer.Errors() {
 			errMsg := err.Err.Error()
@@ -86,7 +92,9 @@ func NewProducer(conf ProducerConfig) (*Producer, error) {
 			p.MetricError.Duration(metricKey, since(err.Msg.Metadata))
 			log.Infof("failed to produce msgId %v to topic %v: %v", err.Msg.Metadata, err.Msg.Topic, errMsg)
 		}
+		cclErrorsClosed()
 	}()
+	ctxSuccessesClosed, cclSuccessesClosed := context.WithCancel(context.Background())
 	go func() {
 		for sent := range p.samProducer.Successes() {
 			metricKey := fmt.Sprintf("%v:%v_success", sent.Topic, sent.Partition)
@@ -95,7 +103,9 @@ func NewProducer(conf ProducerConfig) (*Producer, error) {
 			log.Condf(!p.conf.DisableLog, "delivered msgId %v to topic %v:%v:%v",
 				sent.Metadata, sent.Topic, sent.Partition, sent.Offset)
 		}
+		cclSuccessesClosed()
 	}()
+	p.ctxSuccessDone = ctxSuccessesClosed.Done()
 	return p, nil
 }
 
@@ -132,7 +142,7 @@ func (p Producer) Produce(topic string, msg string) {
 // ProduceWithKey guarantees that all messages with the same non-empty key will
 // be sent to the same partition.
 func (p Producer) ProduceWithKey(topic string, value string, key string) {
-	msgMeta := MsgMetadata{UniqueId: gofast.UUIDGen(), SentAt: time.Now()}
+	msgMeta := msgMetadata{UniqueId: gofast.UUIDGenNoHyphen(), SentAt: time.Now()}
 	samMsg := &sarama.ProducerMessage{
 		Value:     sarama.StringEncoder(value),
 		Topic:     topic,
@@ -159,6 +169,13 @@ func (p Producer) ProduceWithKey(topic string, value string, key string) {
 	}
 }
 
+// Close shuts down the producer and waits for any buffered messages to be flushed
+func (p Producer) Close() {
+	p.samProducer.AsyncClose()
+	<-p.ctxSuccessDone
+	<-p.ctxErrorDone
+}
+
 func truncateLog(s string, limit int) string {
 	if len(s) <= limit {
 		return s
@@ -183,7 +200,7 @@ func (p Producer) getNumberOfSuccessError() (int, int) {
 
 // ProduceReliabilityLevel is the level of acknowledgement reliability.
 // * NoResponse: highest throughput,
-// * WaitForLocal: high, but not maximum durability and high but not maximum throughput,
+// * WaitForLocal: high but not maximum durability and high but not maximum throughput,
 // * WaitForAll: no data loss,
 type ProduceReliabilityLevel string
 
@@ -202,18 +219,19 @@ func mapReliabilityLevel(level ProduceReliabilityLevel) sarama.RequiredAcks {
 
 // ProduceReliabilityLevel enum
 const (
-	NoResponse   = ProduceReliabilityLevel("NoResponse")
-	WaitForLocal = ProduceReliabilityLevel("WaitForLocal")
-	WaitForAll   = ProduceReliabilityLevel("WaitForAll")
+	NoResponse   ProduceReliabilityLevel = "NoResponse"   // highest throughput
+	WaitForLocal ProduceReliabilityLevel = "WaitForLocal" // high but not maximum durability and high but not maximum throughput
+	WaitForAll   ProduceReliabilityLevel = "WaitForAll"   // no data loss
 )
 
-type MsgMetadata struct {
+// to monitor duration for producing a message
+type msgMetadata struct {
 	UniqueId string
 	SentAt   time.Time
 }
 
 func since(msgMetaI interface{}) time.Duration {
-	msgMeta, ok := msgMetaI.(MsgMetadata)
+	msgMeta, ok := msgMetaI.(msgMetadata)
 	if !ok { // unreachable
 		return 0
 	}

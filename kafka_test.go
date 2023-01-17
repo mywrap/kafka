@@ -11,12 +11,13 @@ import (
 	"github.com/mywrap/metric"
 )
 
+// the following tests need a running kafka server,
+// example setup: https://github.com/daominah/zookafka
+
 //const brokersTest = "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092"
 //const brokersTest = "10.100.50.100:9092,10.100.50.101:9092,10.100.50.102:9092"
 const brokersTest = "127.0.0.1:9092"
 
-// this test need a running kafka server,
-// example setup: https://github.com/daominah/zookafka
 func Test_Kafka(t *testing.T) {
 	// test number of successfully sent and received messages
 
@@ -115,8 +116,61 @@ func Test_Kafka(t *testing.T) {
 	mu.Unlock()
 }
 
+// TODO: automatically check result of TestConsumer_Rebalance
 func TestConsumer_Rebalance(t *testing.T) {
-
+	group := "TestGroup" + gofast.UUIDGenNoHyphen()
+	t.Logf("init consumer0")
+	consumer0, err := NewConsumer(ConsumerConfig{
+		BootstrapServers: brokersTest,
+		GroupId:          group,
+		Offset:           OffsetEarliest,
+		Topics:           "TestTopic0,TestTopic1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for {
+			msgs, err := consumer0.Consume()
+			if err != nil {
+				t.Logf("error Consume: %v\n", err)
+				time.Sleep(1 * time.Second)
+				continue
+			}
+			for _, msg := range msgs {
+				t.Logf("consumed from %v:%v:%v message: %v\n",
+					msg.Topic, msg.Partition, msg.Offset, msg.Value)
+			}
+		}
+	}()
+	time.Sleep(1 * time.Second)
+	t.Logf("init consumer1")
+	consumer1, err := NewConsumer(ConsumerConfig{
+		BootstrapServers: brokersTest,
+		GroupId:          group,
+		Offset:           OffsetEarliest,
+		Topics:           "TestTopic0,TestTopic1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for {
+			msgs, err := consumer1.Consume()
+			if err != nil {
+				t.Logf("error when consumer ReadMessage: %v\n", err)
+				time.Sleep(1 * time.Second)
+				continue
+			}
+			for _, msg := range msgs {
+				t.Logf("consumed from %v%v%v message: %v",
+					msg.Topic, msg.Partition, msg.Offset, msg.Value)
+			}
+		}
+	}()
+	t.Logf("let's see group balance")
+	time.Sleep(2 * time.Second)
+	// each consumer should claim a fair share number of partitions
 }
 
 // test on broker with message.max.bytes=1000000

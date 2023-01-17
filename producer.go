@@ -19,7 +19,7 @@ type ProducerConfig struct {
 	// BrokersList is comma separated: "broker1:9092,broker2:9092,broker3:9092"
 	BrokersList string
 	// level of acknowledgement reliability, default NoResponse
-	RequiredAcks ProduceReliabilityLevel
+	RequiredAcks ProducerReliabilityLevel
 
 	// the following configs are optional
 
@@ -95,6 +95,7 @@ func NewProducer(conf ProducerConfig) (*Producer, error) {
 		cclErrorsClosed()
 	}()
 	ctxSuccessesClosed, cclSuccessesClosed := context.WithCancel(context.Background())
+	p.ctxSuccessDone = ctxSuccessesClosed.Done()
 	go func() {
 		for sent := range p.samProducer.Successes() {
 			metricKey := fmt.Sprintf("%v:%v_success", sent.Topic, sent.Partition)
@@ -105,7 +106,6 @@ func NewProducer(conf ProducerConfig) (*Producer, error) {
 		}
 		cclSuccessesClosed()
 	}()
-	p.ctxSuccessDone = ctxSuccessesClosed.Done()
 	return p, nil
 }
 
@@ -198,30 +198,30 @@ func (p Producer) getNumberOfSuccessError() (int, int) {
 	return nSuccesses, nFails
 }
 
-// ProduceReliabilityLevel is the level of acknowledgement reliability.
-// * NoResponse: highest throughput,
-// * WaitForLocal: high but not maximum durability and high but not maximum throughput,
-// * WaitForAll: no data loss,
-type ProduceReliabilityLevel string
+// ProducerReliabilityLevel is the level of acknowledgement reliability.
+// * NoResponse: highest throughput.
+// * WaitForLocal: high but not maximum durability and high but not maximum throughput.
+// * WaitForAll: no data loss.
+type ProducerReliabilityLevel string
 
-func mapReliabilityLevel(level ProduceReliabilityLevel) sarama.RequiredAcks {
+func mapReliabilityLevel(level ProducerReliabilityLevel) sarama.RequiredAcks {
 	switch level {
-	//case NoResponse:
-	//	return sarama.NoResponse
+	case NoResponse:
+		return sarama.NoResponse
 	case WaitForLocal:
 		return sarama.WaitForLocal
 	case WaitForAll:
 		return sarama.WaitForAll
 	default:
-		return sarama.NoResponse
+		return sarama.WaitForLocal
 	}
 }
 
-// ProduceReliabilityLevel enum
+// ProducerReliabilityLevel enum
 const (
-	NoResponse   ProduceReliabilityLevel = "NoResponse"   // highest throughput
-	WaitForLocal ProduceReliabilityLevel = "WaitForLocal" // high but not maximum durability and high but not maximum throughput
-	WaitForAll   ProduceReliabilityLevel = "WaitForAll"   // no data loss
+	NoResponse   ProducerReliabilityLevel = "NoResponse"   // highest throughput
+	WaitForLocal ProducerReliabilityLevel = "WaitForLocal" // high but not maximum durability and high but not maximum throughput
+	WaitForAll   ProducerReliabilityLevel = "WaitForAll"   // no data loss
 )
 
 // to monitor duration for producing a message

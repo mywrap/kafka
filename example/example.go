@@ -42,12 +42,13 @@ func mainConsumer() {
 	for {
 		msgs, err := consumer.Consume()
 		if err != nil {
-			log.Printf("error when consumer ReadMessage: %v\n", err)
+			log.Printf("error Consume: %v", err)
 			time.Sleep(1 * time.Second)
 			continue
 		}
 		for _, msg := range msgs {
-			log.Printf("msg created at %v: %v", msg.Timestamp, msg.Value)
+			log.Printf("consumed from %v:%v:%v message: %v",
+				msg.Topic, msg.Partition, msg.Offset, msg.Value)
 		}
 	}
 }

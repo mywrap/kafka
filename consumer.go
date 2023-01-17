@@ -24,9 +24,9 @@ type ConsumerConfig struct {
 	// in the group. If a new group member(s) arrive and an old member(s) leave,
 	// the partitions will be re-assigned to consumers in the group.
 	GroupId string
-	// Offset will be used ONLY if consumer group does not have a valid offset
+	// ConsumerInitialOffset will be used ONLY if consumer group does not have a valid offset
 	// committed (value must be OffsetEarliest or OffsetLatest)
-	Offset Offset
+	Offset ConsumerInitialOffset
 }
 
 // Message represents a message consumed from Kafka by a Consumer
@@ -53,7 +53,7 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 	c := &Consumer{mutex: &sync.Mutex{}}
 	log.Printf("initializing a consumer with config %+v", conf)
 	samConf := sarama.NewConfig()
-	samConf.Consumer.Offsets.Initial = int64(conf.Offset)
+	samConf.Consumer.Offsets.Initial = mapOffset(conf.Offset)
 	kafkaVerS := "1.1.1"
 	var err error
 	samConf.Version, err = sarama.ParseKafkaVersion(kafkaVerS)
@@ -282,13 +282,24 @@ func (h *handlerImpl) ConsumeClaim(
 	}
 }
 
-// Offset configs the consumer
-type Offset int64
+// ConsumerInitialOffset is the initial offset to use if no offset was previously committed
+type ConsumerInitialOffset string
+
+func mapOffset(myOffset ConsumerInitialOffset) int64 {
+	switch myOffset {
+	case OffsetEarliest:
+		return sarama.OffsetOldest
+	case OffsetLatest:
+		return sarama.OffsetNewest
+	default:
+		return sarama.OffsetNewest
+	}
+}
 
 // Initial offset IF consumer group does not have a valid committed offset
 const (
-	OffsetEarliest = Offset(sarama.OffsetOldest)
-	OffsetLatest   = Offset(sarama.OffsetNewest)
+	OffsetEarliest = "earliest"
+	OffsetLatest   = "latest"
 )
 
 var (

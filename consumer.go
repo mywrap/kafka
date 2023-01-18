@@ -139,8 +139,11 @@ func NewConsumer(conf ConsumerConfig) (*Consumer, error) {
 
 // Consume blocks until it receives at least 1 message (exactly 1 message is
 // preferred but sometimes this returns more because Kafka partitions can return
-// many messages at the same time). If this func returns an error, caller should
-// sleep for some seconds before calling Consume again.
+// many messages at the same time). This func auto commits offset for the
+// returned message (but not immediately to Kafka servers, so if the app crash,
+// you may end up processing the same message twice).
+// If this func returns an error, caller should sleep for some seconds before
+// calling Consume again (consumers group is rebalancing).
 func (c Consumer) Consume() ([]Message, error) {
 	c.mutex.Lock()
 	currentHandler := c.handler
@@ -263,7 +266,14 @@ func (h *handlerImpl) ConsumeClaim(
 					r.responseChan <- nil
 					continue
 				}
-				session.MarkMessage(samMsg, "") // commit offset
+
+				// lib sarama Note:
+				// calling MarkOffset does not necessarily commit the offset to the backend
+				// store immediately for efficiency reasons, and it may never be committed if
+				// your application crashes. This means that you may end up processing the same
+				// message twice, and your processing should ideally be idempotent.
+				// TODO: immediately commit offset to Kafka server if needed, now unit tests cannot commit offset
+				session.MarkMessage(samMsg, "")
 				msg := &Message{
 					Value:     string(samMsg.Value),
 					Offset:    samMsg.Offset,

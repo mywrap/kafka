@@ -15,7 +15,7 @@ import (
 // example setup: https://github.com/daominah/zookafka
 
 //const brokersTest = "192.168.99.100:9092,192.168.99.101:9092,192.168.99.102:9092"
-//const brokersTest = "10.100.50.100:9092,10.100.50.101:9092,10.100.50.102:9092"
+//const brokersTest = "172.31.245.221:9092"
 const brokersTest = "127.0.0.1:9092"
 
 func Test_Kafka(t *testing.T) {
